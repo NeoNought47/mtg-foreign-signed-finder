@@ -83,7 +83,7 @@ python3 mtg-foreign-signed-finder.py "Lightning Bolt" -l en,jp --signed --foil  
 - **Card Kingdom doesn't sell signed cards**, so with `--signed` it says so and is skipped.
 
 ### Output
-- Before each site it says what it is looking for, e.g. `Searching TCGplayer for French foil Simic Signet...` or `Searching TCGplayer for signed Lightning Bolt...` (Chinese script: `正在 TCGplayer 上找法语闪的 Simic Signet...`).
+- Before each site it says what it is looking for, e.g. `Searching TCGplayer for French foil Simic Signet...` or `Searching TCGplayer for signed Lightning Bolt in any language...` (Chinese script: `正在 TCGplayer 上找法语闪的 Simic Signet...`).
 - **TCGplayer**: for each printing with matching listings, shows the set, product link, and per language and finish the number of listings, total quantity and lowest price.
 - **Card Kingdom**: for each matching printing, shows the set, variant, product link, language, finish, retail price and stock.
 - Each site ends with a one-line summary.
@@ -180,7 +180,7 @@ python3 mtg-foreign-signed-finder-zh.py "Lightning Bolt" -l 英语,日语 --sign
 - **Card Kingdom 不卖签名卡**，用 `--signed` 时会提示并跳过。
 
 #### 输出
-- 每查一家网站前先说明在找什么，例如 `正在 TCGplayer 上找法语闪的 Simic Signet...`、`正在 TCGplayer 上找签名的 Lightning Bolt...`。
+- 每查一家网站前先说明在找什么，例如 `正在 TCGplayer 上找法语闪的 Simic Signet...`、`正在 TCGplayer 上找任意语言签名的 Lightning Bolt...`。
 - **TCGplayer**：每个有符合条件挂单的版本，列出系列、商品链接，以及每种语言和闪/平的挂单数、总张数、最低价。
 - **Card Kingdom**：每个符合条件的版本，列出系列、版本描述、商品链接、语言、闪/平、售价和库存。
 - 每家网站最后有一行小结。

@@ -141,6 +141,8 @@ def describe_search(site: str, name: str, args) -> str:
     signed = {"signed": " signed", "unsigned": " unsigned"}.get(args.signed, "")
     finish = {"foil": " foil", "nonfoil": " non-foil"}.get(args.finish, "")
     what = " ".join(w for w in (lang, signed.strip(), finish.strip(), name) if w)
+    if set(args.langs) == set(LANGS):
+        what += " in any language"
     return f"Searching {site} for {what}..."
 
 

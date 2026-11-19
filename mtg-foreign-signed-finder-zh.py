@@ -136,7 +136,7 @@ def describe_search(site: str, name: str, args) -> str:
     if set(args.langs) == set(FOREIGN):
         lang = "外语"
     elif set(args.langs) == set(LANGS):
-        lang = ""
+        lang = "任意语言"
     else:
         names = [LANGS[c][1] for c in args.langs]
         lang = names[0] if len(names) == 1 else "、".join(names[:-1]) + "或" + names[-1]
