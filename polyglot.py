@@ -7,12 +7,14 @@ Usage:
   python3 polyglot.py "Lightning Bolt"
   python3 polyglot.py "Sol Ring" --site tcg
   python3 polyglot.py "Simic Signet" -l fr --foil
+  python3 polyglot.py "Lightning Bolt" -l en,jp --signed
   python3 polyglot.py "Liliana, Dreadhorde General" --site ck
   python3 polyglot.py "Lightning Bolt" --debug     # print raw API fields
 
 Requires: pip install requests
 """
 import argparse
+import html
 import json
 import re
 import sys
@@ -27,6 +29,7 @@ UA = ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
 
 # code -> (TCGplayer language name, accepted aliases). Codes follow TCGplayer's languageAbbreviation
 LANGS = {
+    "EN": ("English",     ["eng", "english"]),
     "JP": ("Japanese",    ["ja", "jpn", "japanese"]),
     "CS": ("Chinese (S)", ["zhs", "chs", "sc", "simplified"]),
     "CT": ("Chinese (T)", ["zht", "cht", "tc", "traditional"]),
@@ -44,6 +47,40 @@ LANG_DISPLAY = {"CS": "Simplified Chinese", "CT": "Traditional Chinese"}
 # Aliases that expand to several codes
 LANG_GROUPS = {"zh": ["CS", "CT"], "cn": ["CS", "CT"], "chinese": ["CS", "CT"]}
 TCG_NAME_TO_CODE = {name: code for code, (name, _) in LANGS.items()}
+# Default: every language except English
+FOREIGN = [c for c in LANGS if c != "EN"]
+
+# Signed cards on TCGplayer are photo ("custom") listings whose seller-written
+# title/description says so. Phrases that only look like a signature are removed first.
+SIGNED_RE = re.compile(r"\bsigned\b|\bautograph(ed)?\b|\bsignature\b|\bartist proof\b", re.I)
+NOT_SIGNED_RE = re.compile(
+    r"\b(not|never|no)\s+(been\s+)?signed\b|\bno\s+signature\b|"
+    r"\bsignature\s+(spellbook|foil|series|edition)\b", re.I)
+
+
+def listing_text(x) -> str:
+    cd = x.get("customData") or {}
+    text = html.unescape(f"{cd.get('title') or ''} {cd.get('description') or ''}")
+    return re.sub(r"<[^>]+>", " ", text)
+
+
+def listing_title(x) -> str:
+    """Seller's title, plus the description when it adds something."""
+    cd = x.get("customData") or {}
+    clean = lambda t: " ".join(re.sub(r"<[^>]+>", " ", html.unescape(t or "")).split())
+    title, desc = clean(cd.get("title")), clean(cd.get("description"))
+    text = title if not desc or desc in title else f"{title} | {desc}"
+    return text[:100]
+
+
+def is_signed(x) -> bool:
+    if x.get("listingType") != "custom":
+        return False
+    return bool(SIGNED_RE.search(NOT_SIGNED_RE.sub(" ", listing_text(x))))
+
+
+def signed_ok(signed: bool, mode: str) -> bool:
+    return mode == "all" or (mode == "signed") == signed
 
 # Words in a Card Kingdom variation/edition that mark a foreign printing
 LANG_RE = re.compile(
@@ -79,13 +116,16 @@ def finish_ok(is_foil: bool, finish: str) -> bool:
 
 def describe_search(site: str, name: str, args) -> str:
     """e.g. 'Searching TCGplayer for French foil Simic Signet...'"""
-    if set(args.langs) == set(LANGS):
+    if set(args.langs) == set(FOREIGN):
         lang = "non-English"
+    elif set(args.langs) == set(LANGS):
+        lang = "any-language"
     else:
         names = [LANG_DISPLAY.get(c, LANGS[c][0]) for c in args.langs]
         lang = names[0] if len(names) == 1 else ", ".join(names[:-1]) + " or " + names[-1]
+    signed = {"signed": " signed", "unsigned": " unsigned"}.get(args.signed, "")
     finish = {"foil": " foil", "nonfoil": " non-foil"}.get(args.finish, "")
-    return f"Searching {site} for {lang}{finish} {name}..."
+    return f"Searching {site} for {lang}{signed}{finish} {name}..."
 
 
 def progress(msg: str):
@@ -174,12 +214,14 @@ def tcg_search(s, name, delay, max_products, fuzzy, debug):
     return products[:max_products]
 
 
-def tcg_listings(s, pid, langs, delay, max_pages=10):
+def tcg_listings(s, pid, langs, delay, max_pages=10, listing_types=None):
     out, frm, size = [], 0, 50
     for _ in range(max_pages):
         filters = json.loads(json.dumps(LISTING_FILTERS))
         if langs:
             filters["term"]["language"] = langs
+        if listing_types:
+            filters["term"]["listingType"] = listing_types
         body = {"filters": filters, "from": frm, "size": size,
                 "sort": {"field": "price+shipping", "order": "asc"},
                 "context": {"shippingCountry": "US", "cart": {}},
@@ -211,21 +253,24 @@ def run_tcg(name, args):
             print("[debug] listing fields:", sorted(sample[0].keys()))
 
     tcg_langs = [LANGS[c][0] for c in args.langs]
+    # Signed cards are always photo listings, so ask the API for those only
+    types = ["custom"] if args.signed == "signed" else None
     found, warned = 0, False
     for i, p in enumerate(products, 1):
         progress(f"  [{i}/{len(products)}] {p['set']}")
         time.sleep(args.delay)
         try:
-            items = tcg_listings(s, p["id"], tcg_langs, args.delay)
+            items = tcg_listings(s, p["id"], tcg_langs, args.delay, listing_types=types)
         except requests.HTTPError as e:
             progress("")
             print(f"  ! {p['set']} / {p['name']}: request failed: {e}")
             continue
-        if any(x.get("language") == "English" for x in items) and not warned:
+        if any(x.get("language") not in tcg_langs for x in items) and not warned:
             progress("")
-            print("  ! Note: the language filter seems to be ignored; English listings removed locally")
+            print("  ! Note: the language filter seems to be ignored; other languages removed locally")
             warned = True
         groups = defaultdict(lambda: {"n": 0, "qty": 0, "min": None})
+        signed_rows = []
         for x in items:
             lang = x.get("language", "?")
             if lang not in tcg_langs:
@@ -233,12 +278,17 @@ def run_tcg(name, args):
             printing = x.get("printing", "?")
             if not finish_ok(printing.lower() == "foil", args.finish):
                 continue
+            if not signed_ok(is_signed(x), args.signed):
+                continue
+            if args.signed == "signed":  # each signed card is unique, list them one by one
+                signed_rows.append(x)
+                continue
             g = groups[(lang, printing)]
             g["n"] += 1
             g["qty"] += int(x.get("quantity") or 0)
             price = float(x.get("price") or 0)
             g["min"] = price if g["min"] is None else min(g["min"], price)
-        if not groups:
+        if not groups and not signed_rows:
             continue
         found += 1
         progress("")
@@ -248,6 +298,12 @@ def run_tcg(name, args):
             code = TCG_NAME_TO_CODE.get(lang, "??")
             print(f"    {code} {lang:<12} {printing:<8} {g['n']:>3} listings / {g['qty']:>3} cards"
                   f"   from ${g['min']:.2f}")
+        for x in signed_rows:
+            code = TCG_NAME_TO_CODE.get(x.get("language"), "??")
+            title = listing_title(x)
+            print(f"    {code} {x.get('language', '?'):<12} {x.get('printing', '?'):<8}"
+                  f" ${float(x.get('price') or 0):>8.2f}  {x.get('condition', '')}"
+                  f"  [{x.get('sellerName', '')}]\n        \"{title}\"")
     progress("")
     print(f"\nTCGplayer summary: {found} of {len(products)} printings have matching listings.")
 
@@ -273,6 +329,9 @@ def ck_load(max_age_h):
 
 def run_ck(name, args):
     print(f"\n{describe_search('Card Kingdom', name, args)}")
+    if args.signed == "signed":
+        print("Card Kingdom doesn't sell signed cards, skipping.")
+        return
     items = ck_load(args.ck_cache_hours)
     matches = [it for it in items if name_matches(name, it.get("name", ""), args.fuzzy)]
     print(f"=== Card Kingdom: {len(matches)} matching entries in the price list ===")
@@ -289,10 +348,10 @@ def run_ck(name, args):
         # otherwise cards like "Phyrexian Arena" are flagged as Phyrexian language
         text = " ".join(str(it.get(k) or "") for k in ("variation", "edition"))
         m = LANG_RE.search(text)
-        if not m:
-            continue
-        word = m.group(1).lower()
-        if word == "chinese":
+        word = m.group(1).lower() if m else None
+        if word is None:
+            code = "EN"
+        elif word == "chinese":
             code = "CT" if "traditional" in text.lower() else "CS"
         else:
             code = CK_WORD_TO_CODE[word]
@@ -300,7 +359,7 @@ def run_ck(name, args):
         if code in args.langs and finish_ok(is_foil, args.finish):
             foreign.append((code, is_foil, it))
     if not foreign:
-        print("No matching foreign-language printings (based on the variant description).")
+        print("No matching printings (language is based on the variant description).")
         return
     for code, is_foil, it in foreign:
         foil = "Foil" if is_foil else "Normal"
@@ -309,7 +368,7 @@ def run_ck(name, args):
         print(f"\n[{it.get('edition')}] {it.get('name')}{var}")
         print(f"  https://www.cardkingdom.com/{str(it.get('url', '')).lstrip('/')}")
         print(f"    {lang:<15} {foil:<8} ${it.get('price_retail')}   in stock: {it.get('qty_retail')}")
-    print(f"\nCard Kingdom summary: {len(foreign)} foreign-language printings.")
+    print(f"\nCard Kingdom summary: {len(foreign)} matching printings.")
 
 
 # ---------------- main ----------------
@@ -324,14 +383,20 @@ def main():
     ap.add_argument("--site", default="all",
                     choices=["all", "tcg", "tcgplayer", "ck", "cardkingdom"],
                     help="search one site only (default: both)")
-    ap.add_argument("--lang", "-l", dest="langs", type=parse_langs, default=list(LANGS),
-                    help="only these languages, comma separated, e.g. --lang jp,cs or -l zh")
+    ap.add_argument("--lang", "-l", dest="langs", type=parse_langs, default=list(FOREIGN),
+                    help="only these languages, comma separated, e.g. --lang jp,cs or -l zh "
+                         "(default: every language except English; add en to include English)")
     fin = ap.add_mutually_exclusive_group()
     fin.add_argument("--foil", dest="finish", action="store_const", const="foil",
                      help="foils only")
     fin.add_argument("--nonfoil", dest="finish", action="store_const", const="nonfoil",
                      help="non-foils only")
-    ap.set_defaults(finish="all")
+    sig = ap.add_mutually_exclusive_group()
+    sig.add_argument("--signed", dest="signed", action="store_const", const="signed",
+                     help="signed cards only (TCGplayer only; based on the seller's listing text)")
+    sig.add_argument("--unsigned", dest="signed", action="store_const", const="unsigned",
+                     help="leave out signed cards")
+    ap.set_defaults(finish="all", signed="all")
     ap.add_argument("--fuzzy", action="store_true", help="looser name matching (substring)")
     ap.add_argument("--delay", type=float, default=0.7, help="seconds between requests")
     ap.add_argument("--max-products", type=int, default=80,

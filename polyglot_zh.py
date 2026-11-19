@@ -8,12 +8,14 @@ polyglot_zh.py：查一张万智牌在 TCGplayer 和 Card Kingdom 上，哪些�
   python3 polyglot_zh.py "Sol Ring" --site tcg
   python3 polyglot_zh.py "Simic Signet" -l 法语 --foil
   python3 polyglot_zh.py "Sol Ring" -l fr,de,jp
+  python3 polyglot_zh.py "Lightning Bolt" -l 英语,日语 --signed
   python3 polyglot_zh.py "Liliana, Dreadhorde General" --site ck
   python3 polyglot_zh.py "Lightning Bolt" --debug     # 打印接口原始字段，排查用
 
 依赖: pip install requests
 """
 import argparse
+import html
 import json
 import re
 import sys
@@ -29,6 +31,7 @@ UA = ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
 
 # 语言代码 -> (TCGplayer 的语言名, 中文名, 可以接受的别名)。代码取 TCGplayer 的 languageAbbreviation
 LANGS = {
+    "EN": ("English",     "英语",     ["eng", "english", "英", "英语", "英文"]),
     "JP": ("Japanese",    "日语",     ["ja", "jpn", "japanese", "日", "日语", "日文"]),
     "CS": ("Chinese (S)", "简体中文", ["zhs", "chs", "sc", "simplified", "简", "简体", "简中", "简体中文"]),
     "CT": ("Chinese (T)", "繁体中文", ["zht", "cht", "tc", "traditional", "繁", "繁体", "繁中", "繁体中文"]),
@@ -46,6 +49,40 @@ LANG_GROUPS = {"zh": ["CS", "CT"], "cn": ["CS", "CT"], "chinese": ["CS", "CT"],
                "中": ["CS", "CT"], "中文": ["CS", "CT"]}
 TCG_NAME_TO_CODE = {name: code for code, (name, _, _) in LANGS.items()}
 FINISH_ZH = {"Foil": "闪", "Normal": "平"}
+# 默认：除英语以外的所有语言
+FOREIGN = [c for c in LANGS if c != "EN"]
+
+# TCGplayer 上的签名卡都是卖家拍照的 custom 挂单，签名信息写在卖家填的标题/描述里。
+# 先去掉只是看起来像签名的词（如 Signature Spellbook 系列、Signature Foil 版本、not signed）
+SIGNED_RE = re.compile(r"\bsigned\b|\bautograph(ed)?\b|\bsignature\b|\bartist proof\b", re.I)
+NOT_SIGNED_RE = re.compile(
+    r"\b(not|never|no)\s+(been\s+)?signed\b|\bno\s+signature\b|"
+    r"\bsignature\s+(spellbook|foil|series|edition)\b", re.I)
+
+
+def listing_text(x) -> str:
+    cd = x.get("customData") or {}
+    text = html.unescape(f"{cd.get('title') or ''} {cd.get('description') or ''}")
+    return re.sub(r"<[^>]+>", " ", text)
+
+
+def listing_title(x) -> str:
+    """卖家写的标题，描述有新内容时也带上"""
+    cd = x.get("customData") or {}
+    clean = lambda t: " ".join(re.sub(r"<[^>]+>", " ", html.unescape(t or "")).split())
+    title, desc = clean(cd.get("title")), clean(cd.get("description"))
+    text = title if not desc or desc in title else f"{title} | {desc}"
+    return text[:100]
+
+
+def is_signed(x) -> bool:
+    if x.get("listingType") != "custom":
+        return False
+    return bool(SIGNED_RE.search(NOT_SIGNED_RE.sub(" ", listing_text(x))))
+
+
+def signed_ok(signed: bool, mode: str) -> bool:
+    return mode == "all" or (mode == "signed") == signed
 
 # Card Kingdom 版本描述里出现这些词，视为外语版本
 LANG_RE = re.compile(
@@ -81,13 +118,16 @@ def finish_ok(is_foil: bool, finish: str) -> bool:
 
 def describe_search(site: str, name: str, args) -> str:
     """例如 '正在 TCGplayer 上找法语闪的 Simic Signet...'"""
-    if set(args.langs) == set(LANGS):
+    if set(args.langs) == set(FOREIGN):
         lang = "外语"
+    elif set(args.langs) == set(LANGS):
+        lang = "所有语言"
     else:
         names = [LANGS[c][1] for c in args.langs]
         lang = names[0] if len(names) == 1 else "、".join(names[:-1]) + "或" + names[-1]
+    signed = {"signed": "签名", "unsigned": "无签名"}.get(args.signed, "")
     finish = {"foil": "闪", "nonfoil": "平"}.get(args.finish, "")
-    return f"正在 {site} 上找{lang}{finish}的 {name}..."
+    return f"正在 {site} 上找{lang}{signed}{finish}的 {name}..."
 
 
 def pad(s: str, width: int) -> str:
@@ -182,12 +222,14 @@ def tcg_search(s, name, delay, max_products, fuzzy, debug):
     return products[:max_products]
 
 
-def tcg_listings(s, pid, langs, delay, max_pages=10):
+def tcg_listings(s, pid, langs, delay, max_pages=10, listing_types=None):
     out, frm, size = [], 0, 50
     for _ in range(max_pages):
         filters = json.loads(json.dumps(LISTING_FILTERS))
         if langs:
             filters["term"]["language"] = langs
+        if listing_types:
+            filters["term"]["listingType"] = listing_types
         body = {"filters": filters, "from": frm, "size": size,
                 "sort": {"field": "price+shipping", "order": "asc"},
                 "context": {"shippingCountry": "US", "cart": {}},
@@ -219,21 +261,24 @@ def run_tcg(name, args):
             print("[debug] 挂单字段:", sorted(sample[0].keys()))
 
     tcg_langs = [LANGS[c][0] for c in args.langs]
+    # 签名卡一定是拍照挂单，直接让接口只返回这类
+    types = ["custom"] if args.signed == "signed" else None
     found, warned = 0, False
     for i, p in enumerate(products, 1):
         progress(f"  [{i}/{len(products)}] {p['set']}")
         time.sleep(args.delay)
         try:
-            items = tcg_listings(s, p["id"], tcg_langs, args.delay)
+            items = tcg_listings(s, p["id"], tcg_langs, args.delay, listing_types=types)
         except requests.HTTPError as e:
             progress("")
             print(f"  ! {p['set']} / {p['name']}：请求失败 {e}")
             continue
-        if any(x.get("language") == "English" for x in items) and not warned:
+        if any(x.get("language") not in tcg_langs for x in items) and not warned:
             progress("")
-            print("  ! 注意：语言过滤似乎没生效，已在本地排除英文挂单")
+            print("  ! 注意：语言过滤似乎没生效，已在本地排除其他语言的挂单")
             warned = True
         groups = defaultdict(lambda: {"n": 0, "qty": 0, "min": None})
+        signed_rows = []
         for x in items:
             lang = x.get("language", "?")
             if lang not in tcg_langs:
@@ -241,12 +286,17 @@ def run_tcg(name, args):
             printing = x.get("printing", "?")
             if not finish_ok(printing.lower() == "foil", args.finish):
                 continue
+            if not signed_ok(is_signed(x), args.signed):
+                continue
+            if args.signed == "signed":  # 签名卡每张都不一样，逐条列出
+                signed_rows.append(x)
+                continue
             g = groups[(lang, printing)]
             g["n"] += 1
             g["qty"] += int(x.get("quantity") or 0)
             price = float(x.get("price") or 0)
             g["min"] = price if g["min"] is None else min(g["min"], price)
-        if not groups:
+        if not groups and not signed_rows:
             continue
         found += 1
         progress("")
@@ -257,6 +307,12 @@ def run_tcg(name, args):
             zh = LANGS[code][1] if code in LANGS else lang
             print(f"    {code} {pad(zh, 12)} {FINISH_ZH.get(printing, printing)}"
                   f"  {g['n']:>3} 条挂单 / 共 {g['qty']:>3} 张   最低 ${g['min']:.2f}")
+        for x in signed_rows:
+            code = TCG_NAME_TO_CODE.get(x.get("language"), "??")
+            zh = LANGS[code][1] if code in LANGS else x.get("language", "?")
+            print(f"    {code} {pad(zh, 12)} {FINISH_ZH.get(x.get('printing'), x.get('printing', '?'))}"
+                  f"  ${float(x.get('price') or 0):>8.2f}  {x.get('condition', '')}"
+                  f"  [{x.get('sellerName', '')}]\n        \"{listing_title(x)}\"")
     progress("")
     print(f"\nTCGplayer 小结：{len(products)} 个版本里，{found} 个有符合条件的挂单。")
 
@@ -282,6 +338,9 @@ def ck_load(max_age_h):
 
 def run_ck(name, args):
     print(f"\n{describe_search('Card Kingdom', name, args)}")
+    if args.signed == "signed":
+        print("Card Kingdom 不卖签名卡，跳过。")
+        return
     items = ck_load(args.ck_cache_hours)
     matches = [it for it in items if name_matches(name, it.get("name", ""), args.fuzzy)]
     print(f"=== Card Kingdom：价格表里有 {len(matches)} 条匹配 ===")
@@ -297,10 +356,10 @@ def run_ck(name, args):
         # 只看版本描述和系列名，不看牌名，否则 "Phyrexian Arena" 这类牌会被误判
         text = " ".join(str(it.get(k) or "") for k in ("variation", "edition"))
         m = LANG_RE.search(text)
-        if not m:
-            continue
-        word = m.group(1).lower()
-        if word == "chinese":
+        word = m.group(1).lower() if m else None
+        if word is None:
+            code = "EN"
+        elif word == "chinese":
             code = "CT" if "traditional" in text.lower() else "CS"
         else:
             code = CK_WORD_TO_CODE[word]
@@ -308,7 +367,7 @@ def run_ck(name, args):
         if code in args.langs and finish_ok(is_foil, args.finish):
             foreign.append((code, is_foil, it))
     if not foreign:
-        print("没有符合条件的外语版本（按版本描述判断）。")
+        print("没有符合条件的版本（语言按版本描述判断）。")
         return
     for code, is_foil, it in foreign:
         var = f" ({it['variation']})" if it.get("variation") else ""
@@ -316,7 +375,7 @@ def run_ck(name, args):
         print(f"  https://www.cardkingdom.com/{str(it.get('url', '')).lstrip('/')}")
         print(f"    {code} {pad(LANGS[code][1], 12)} {'闪' if is_foil else '平'}"
               f"  售价 ${it.get('price_retail')}   库存 {it.get('qty_retail')}")
-    print(f"\nCard Kingdom 小结：{len(foreign)} 条外语版本。")
+    print(f"\nCard Kingdom 小结：{len(foreign)} 条符合条件的版本。")
 
 
 # ---------------- main ----------------
@@ -330,14 +389,20 @@ def main():
     ap.add_argument("--site", default="all",
                     choices=["all", "tcg", "tcgplayer", "ck", "cardkingdom"],
                     help="只查某一家，默认两家都查")
-    ap.add_argument("--lang", "-l", dest="langs", type=parse_langs, default=list(LANGS),
-                    help="只看这些语言，多个用逗号分隔，例如 -l fr,de,jp 或 -l 法语,德语")
+    ap.add_argument("--lang", "-l", dest="langs", type=parse_langs, default=list(FOREIGN),
+                    help="只看这些语言，多个用逗号分隔，例如 -l fr,de,jp 或 -l 法语,德语"
+                         "（默认除英语外的所有语言，加 en 可以包含英语）")
     fin = ap.add_mutually_exclusive_group()
     fin.add_argument("--foil", dest="finish", action="store_const", const="foil",
                      help="只看闪卡")
     fin.add_argument("--nonfoil", dest="finish", action="store_const", const="nonfoil",
                      help="只看平卡")
-    ap.set_defaults(finish="all")
+    sig = ap.add_mutually_exclusive_group()
+    sig.add_argument("--signed", dest="signed", action="store_const", const="signed",
+                     help="只看签名卡（仅 TCGplayer，按卖家写的挂单文字判断）")
+    sig.add_argument("--unsigned", dest="signed", action="store_const", const="unsigned",
+                     help="排除签名卡")
+    ap.set_defaults(finish="all", signed="all")
     ap.add_argument("--fuzzy", action="store_true", help="放宽名称匹配（包含即可）")
     ap.add_argument("--delay", type=float, default=0.7, help="每次请求间隔秒数")
     ap.add_argument("--max-products", type=int, default=80, help="TCGplayer 最多查几个版本")

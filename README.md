@@ -2,7 +2,7 @@
 
 **English** | [中文](#中文)
 
-Look up a Magic: The Gathering card and find out which printings are sold in a non-English language on **TCGplayer** and **Card Kingdom**, with filters for language and foil/non-foil.
+Look up a Magic: The Gathering card and find out which printings are sold in a non-English language on **TCGplayer** and **Card Kingdom**, with filters for language, foil/non-foil and signed cards.
 
 Two scripts with identical features:
 
@@ -29,6 +29,8 @@ python3 polyglot.py "Simic Signet" -l fr --foil           # French foils only
 python3 polyglot.py "Sol Ring" -l fr,de,jp                # French, German or Japanese
 python3 polyglot.py "Sol Ring" --site tcg --max-products 5
 python3 polyglot.py "Gala Greeters" --site cardkingdom -l zh --nonfoil
+python3 polyglot.py "Lightning Bolt" --signed                # signed foreign cards
+python3 polyglot.py "Lightning Bolt" -l en,jp --signed --foil  # signed English or Japanese foils
 ```
 
 ## Features
@@ -46,7 +48,7 @@ python3 polyglot.py "Gala Greeters" --site cardkingdom -l zh --nonfoil
 - `--site ck` or `--site cardkingdom` searches Card Kingdom only.
 
 ### Language filter
-- `--lang` / `-l` limits results to one or more languages. Without it, every non-English language is included.
+- `--lang` / `-l` limits results to one or more languages. Without it, every language **except English** is included. Add `en` to include English, e.g. `-l en,jp`.
 - Multiple languages mean "any of these": `-l fr,de,jp` shows French, German **or** Japanese.
 - Separate with commas, or with spaces inside quotes: `-l "fr de jp"`.
 - Codes, aliases and full English names can be mixed, case-insensitive: `-l french,ger,ja`.
@@ -54,6 +56,7 @@ python3 polyglot.py "Gala Greeters" --site cardkingdom -l zh --nonfoil
 
 | Code | Language | Also accepted | Chinese names (`polyglot_zh.py` only) |
 | --- | --- | --- | --- |
+| EN | English | eng, english | 英, 英语, 英文 |
 | JP | Japanese | ja, jpn | 日, 日语, 日文 |
 | CS | Chinese (Simplified) | zhs, chs, sc, simplified | 简, 简体, 简中, 简体中文 |
 | CT | Chinese (Traditional) | zht, cht, tc, traditional | 繁, 繁体, 繁中, 繁体中文 |
@@ -72,8 +75,16 @@ python3 polyglot.py "Gala Greeters" --site cardkingdom -l zh --nonfoil
 - `--foil` shows foils only, `--nonfoil` shows non-foils only. Default: both. They can't be used together.
 - Combines with the language filter: `-l fr,de,jp --foil`.
 
+### Signed filter
+- `--signed` shows signed cards only, `--unsigned` leaves signed cards out. Default: both. They can't be used together.
+- Combines with the other filters: `-l en,jp --signed --foil`.
+- **TCGplayer only.** Signed cards are photo listings, and whether a card is signed comes from the seller's own title and description. It counts wording like `Signed`, `Artist signed`, `Signed by ...`, `Autographed`, `with a signature` and `Artist Proof`, and ignores look-alikes like *Signature Spellbook*, `Signature Foil` and `not signed`. A seller who doesn't mention the signature won't be caught.
+- With `--signed`, each signed listing is shown on its own: language, finish, price, condition, seller and the seller's title.
+- **Card Kingdom doesn't sell signed cards**, so with `--signed` it says so and is skipped.
+- Signed foreign cards are rare. If nothing shows up, try adding `-l en`.
+
 ### Output
-- Before each site it says what it is looking for, e.g. `Searching TCGplayer for French foil Simic Signet...` (Chinese script: `正在 TCGplayer 上找法语闪的 Simic Signet...`).
+- Before each site it says what it is looking for, e.g. `Searching TCGplayer for French foil Simic Signet...` or `Searching TCGplayer for non-English signed Lightning Bolt...` (Chinese script: `正在 TCGplayer 上找法语闪的 Simic Signet...`).
 - **TCGplayer**: for each printing with matching listings, shows the set, product link, and per language and finish the number of listings, total quantity and lowest price.
 - **Card Kingdom**: for each matching printing, shows the set, variant, product link, language, finish, retail price and stock.
 - Each site ends with a one-line summary.
@@ -97,14 +108,14 @@ python3 polyglot.py "Gala Greeters" --site cardkingdom -l zh --nonfoil
 ## How it works and limitations
 
 - **TCGplayer** is queried through the internal API its website uses. The script searches for the card, keeps exact name matches, then asks for listings of each printing filtered by language. Printings with many versions (Sol Ring has 100+) take a few minutes; use `--max-products` to limit. If TCGplayer changes its API the script will break; run with `--debug` to see what changed.
-- **Card Kingdom** sells almost only English cards, and its price list has no language field. The script detects foreign printings from the variant and set name, so it only finds printings Card Kingdom lists as their own version, such as WAR Japanese alternate art planeswalkers, Phyrexian language cards and SNC multilingual box toppers. "No matching foreign-language printings" is usually the real answer, not a bug.
+- **Card Kingdom** sells almost only English cards, and its price list has no language field. The script detects foreign printings from the variant and set name, so it only finds printings Card Kingdom lists as their own version, such as WAR Japanese alternate art planeswalkers, Phyrexian language cards and SNC multilingual box toppers. "No matching printings" is usually the real answer, not a bug. With `-l en`, every printing without a language word counts as English.
 - The first Card Kingdom search downloads the full price list (large) and caches it in `~/.cache/polyglot/`.
 
 ---
 
 ## 中文
 
-查一张万智牌在 **TCGplayer** 和 **Card Kingdom** 上，哪些版本有外语（非英文）在卖，可以按语言和闪/平过滤。
+查一张万智牌在 **TCGplayer** 和 **Card Kingdom** 上，哪些版本有外语（非英文）在卖，可以按语言、闪/平和签名过滤。
 
 两个脚本功能完全一样：
 
@@ -131,6 +142,8 @@ python3 polyglot_zh.py "Simic Signet" -l 法语 --foil        # 只看法语闪
 python3 polyglot_zh.py "Sol Ring" -l fr,de,jp               # 法语、德语、日语之一
 python3 polyglot_zh.py "Sol Ring" --site tcg --max-products 5
 python3 polyglot_zh.py "Gala Greeters" --site cardkingdom -l 中文 --nonfoil
+python3 polyglot_zh.py "Lightning Bolt" --signed               # 外语签名卡
+python3 polyglot_zh.py "Lightning Bolt" -l 英语,日语 --signed --foil  # 英语或日语的签名闪
 ```
 
 ### 功能
@@ -148,7 +161,7 @@ python3 polyglot_zh.py "Gala Greeters" --site cardkingdom -l 中文 --nonfoil
 - `--site ck` 或 `--site cardkingdom` 只查 Card Kingdom。
 
 #### 语言过滤
-- `--lang` / `-l` 只看指定的一种或多种语言。不加时包含所有非英语语言。
+- `--lang` / `-l` 只看指定的一种或多种语言。不加时包含**除英语外**的所有语言。要包含英语就加上 `en`，例如 `-l en,jp`。
 - 多种语言表示"其中之一"：`-l fr,de,jp` 会列出法语、德语**或**日语。
 - 用逗号分隔，或者加引号用空格分隔：`-l "fr de jp"`。中文版还支持中文逗号和顿号：`-l 法语、德语，日语`。
 - 代码、别名、英文全名可以混着写，不分大小写：`-l french,ger,ja`。
@@ -160,8 +173,16 @@ python3 polyglot_zh.py "Gala Greeters" --site cardkingdom -l 中文 --nonfoil
 - `--foil` 只看闪卡，`--nonfoil` 只看平卡，默认都看。两个不能同时用。
 - 可以和语言过滤一起用：`-l fr,de,jp --foil`。
 
+#### 签名过滤
+- `--signed` 只看签名卡，`--unsigned` 排除签名卡，默认都看。两个不能同时用。
+- 可以和其他过滤一起用：`-l en,jp --signed --foil`。
+- **只支持 TCGplayer。** 签名卡都是卖家拍照上传的挂单，是否签名是根据卖家自己写的标题和描述判断的。会识别 `Signed`、`Artist signed`、`Signed by ...`、`Autographed`、`with a signature`、`Artist Proof` 这类写法，并排除 *Signature Spellbook* 系列、`Signature Foil` 版本、`not signed` 这类看起来像但不是签名的词。卖家没写签名的就识别不了。
+- 用 `--signed` 时每张签名卡单独列一行：语言、闪/平、价格、品相、卖家和卖家写的标题。
+- **Card Kingdom 不卖签名卡**，用 `--signed` 时会提示并跳过。
+- 外语签名卡很少，查不到的话可以试试加上 `-l en`。
+
 #### 输出
-- 每查一家网站前先说明在找什么，例如 `正在 TCGplayer 上找法语闪的 Simic Signet...`。
+- 每查一家网站前先说明在找什么，例如 `正在 TCGplayer 上找法语闪的 Simic Signet...`、`正在 TCGplayer 上找外语签名的 Lightning Bolt...`。
 - **TCGplayer**：每个有符合条件挂单的版本，列出系列、商品链接，以及每种语言和闪/平的挂单数、总张数、最低价。
 - **Card Kingdom**：每个符合条件的版本，列出系列、版本描述、商品链接、语言、闪/平、售价和库存。
 - 每家网站最后有一行小结。
@@ -185,5 +206,5 @@ python3 polyglot_zh.py "Gala Greeters" --site cardkingdom -l 中文 --nonfoil
 ### 原理和限制
 
 - **TCGplayer** 用的是网页前端的内部接口。脚本先搜索牌名、保留名字完全匹配的版本，再按语言逐个查挂单。版本多的牌（比如 Sol Ring 有 100 多个版本）要跑几分钟，可以用 `--max-products` 限制。TCGplayer 改接口时脚本会失效，用 `--debug` 看哪里变了。
-- **Card Kingdom** 基本只卖英文卡，价格表里也没有语言字段。脚本根据版本描述和系列名判断语言，所以只能查到它单独列成一个版本的外语印刷，比如 WAR 日文异画鹏洛客、Phyrexian 语版本、SNC 多语言盒顶卡。显示"没有符合条件的外语版本"通常就是真实情况，不是脚本坏了。
+- **Card Kingdom** 基本只卖英文卡，价格表里也没有语言字段。脚本根据版本描述和系列名判断语言，所以只能查到它单独列成一个版本的外语印刷，比如 WAR 日文异画鹏洛客、Phyrexian 语版本、SNC 多语言盒顶卡。显示"没有符合条件的版本"通常就是真实情况，不是脚本坏了。用 `-l en` 时，版本描述里没有语言词的都算英语。
 - 第一次查 Card Kingdom 会下载全量价格表（文件较大），缓存在 `~/.cache/polyglot/`。
