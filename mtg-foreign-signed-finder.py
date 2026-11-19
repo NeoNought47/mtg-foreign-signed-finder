@@ -21,6 +21,7 @@ import sys
 import time
 from collections import Counter, defaultdict
 from pathlib import Path
+from urllib.parse import urlencode
 
 import requests
 
@@ -350,7 +351,7 @@ def run_ck(name, args):
     if args.signed == "signed":
         print("Card Kingdom doesn't sell signed cards, skipping.")
         return
-    items = ck_load(args.ck_cache_hours)
+    items = ck_load(args.cache_hours)
     matches = [it for it in items if name_matches(name, it.get("name", ""), args.fuzzy)]
     print(f"=== Card Kingdom: {len(matches)} matching entries in the price list ===")
     if args.debug:
@@ -389,6 +390,126 @@ def run_ck(name, args):
     print(f"\nCard Kingdom summary: {len(foreign)} matching printings.")
 
 
+# ---------------- Cardmarket ----------------
+# Cardmarket's website is behind Cloudflare and its API needs a seller account,
+# so listings can't be read. Its public catalog and price guide downloads are open:
+# they give every printing and its prices (all languages together), and the script
+# builds product links with Cardmarket's own filters already applied.
+CM_PRODUCTS_URL = "https://downloads.s3.cardmarket.com/productCatalog/productList/products_singles_1.json"
+CM_PRICES_URL = "https://downloads.s3.cardmarket.com/productCatalog/priceGuide/price_guide_1.json"
+CM_PRODUCT_PAGE = "https://www.cardmarket.com/en/Magic/Products"
+SCRYFALL_SEARCH = "https://api.scryfall.com/cards/search"
+# Cardmarket idLanguage numbers. It has no Phyrexian
+CM_LANG_ID = {"EN": 1, "FR": 2, "DE": 3, "SP": 4, "IT": 5, "CS": 6,
+              "JP": 7, "PT": 8, "RU": 9, "KR": 10, "CT": 11}
+
+
+def cached_json(url, filename, max_age_h, msg):
+    path = CK_CACHE.parent / filename
+    if path.exists() and time.time() - path.stat().st_mtime < max_age_h * 3600:
+        text = path.read_text()
+    else:
+        print(msg)
+        r = requests.get(url, headers={"User-Agent": UA}, timeout=180)
+        r.raise_for_status()
+        text = r.text
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
+    return json.loads(text)
+
+
+def scryfall_sets(name):
+    """Cardmarket idProduct -> (set name, release date), from Scryfall."""
+    out = {}
+    s = requests.Session()
+    s.headers.update({"User-Agent": "mtg-foreign-signed-finder/1.0", "Accept": "application/json"})
+    url = SCRYFALL_SEARCH
+    params = {"q": f'!"{name}"', "unique": "prints",
+              "include_extras": "true", "include_variations": "true"}
+    while url:
+        r = s.get(url, params=params, timeout=30)
+        if r.status_code == 404:  # no such card
+            break
+        r.raise_for_status()
+        d = r.json()
+        for c in d.get("data", []):
+            if c.get("cardmarket_id"):
+                out[c["cardmarket_id"]] = (c.get("set_name", ""), c.get("released_at", ""))
+        url, params = (d.get("next_page"), None) if d.get("has_more") else (None, None)
+        time.sleep(0.1)  # Scryfall asks for 50-100 ms between requests
+    return out
+
+
+def cm_link(pid, code, args):
+    q = {"idProduct": pid}
+    if code:
+        q["language"] = CM_LANG_ID[code]
+    if args.finish != "all":
+        q["isFoil"] = "Y" if args.finish == "foil" else "N"
+    if args.signed != "all":
+        q["isSigned"] = "Y" if args.signed == "signed" else "N"
+    return f"{CM_PRODUCT_PAGE}?{urlencode(q)}"
+
+
+def euro(v):
+    return f"€{v:.2f}" if v else "-"
+
+
+def run_cm(name, args):
+    print(f"\n{describe_search('Cardmarket', name, args)}")
+    usable = [c for c in args.langs if c in CM_LANG_ID]
+    if not usable:
+        print("Cardmarket has no filter for these languages, skipping.")
+        return
+    products = cached_json(CM_PRODUCTS_URL, "cm_products.json", args.cache_hours,
+                           "Downloading the Cardmarket catalog (large file, will be cached)...")["products"]
+    matches = [p for p in products if name_matches(name, p.get("name", ""), args.fuzzy)
+               and not p.get("name", "").startswith("Art Series:")]  # art cards, not playable
+    if not matches:
+        print("Nothing found. Check the spelling (use the English card name), or try --fuzzy.")
+        return
+    guide = cached_json(CM_PRICES_URL, "cm_price_guide.json", args.cache_hours,
+                        "Downloading the Cardmarket price guide (large file, will be cached)...")
+    prices = {g["idProduct"]: g for g in guide.get("priceGuides", [])}
+    try:
+        sets = scryfall_sets(name)
+    except requests.RequestException as e:
+        print(f"  ! Couldn't get set names from Scryfall ({e}), showing expansion ids")
+        sets = {}
+    matches.sort(key=lambda p: sets.get(p["idProduct"], ("", ""))[1], reverse=True)
+    matches = matches[:args.max_products]
+
+    # The default language set means "don't filter by language" on the page
+    default_langs = set(args.langs) in (set(FOREIGN), set(LANGS))
+    link_langs = [None] if default_langs else usable
+    print(f"=== Cardmarket: {len(matches)} matching printings ===")
+    print("Cardmarket blocks scripts, so stock can't be checked here.")
+    print("Each link opens the printing with the filters already applied.")
+    if default_langs and set(args.langs) == set(FOREIGN):
+        print("Links aren't filtered by language (the page will include English); "
+              "pick one with -l for language-filtered links.")
+    left_out = [LANGS[c][0] for c in args.langs if c not in CM_LANG_ID and not default_langs]
+    if left_out:
+        print(f"Cardmarket has no filter for {', '.join(left_out)}, left out.")
+
+    for p in matches:
+        pid = p["idProduct"]
+        set_name = sets.get(pid, (f"Cardmarket expansion #{p.get('idExpansion')}", ""))[0]
+        g = prices.get(pid, {})
+        print(f"\n[{set_name}] {p['name']}")
+        parts = []
+        if args.finish != "foil":
+            parts.append(f"Normal from {euro(g.get('low'))}, trend {euro(g.get('trend'))}")
+        if args.finish != "nonfoil" and (g.get("low-foil") or g.get("trend-foil")):
+            parts.append(f"Foil from {euro(g.get('low-foil'))}, trend {euro(g.get('trend-foil'))}")
+        if parts:
+            print(f"  Price guide (all languages): {' | '.join(parts)}")
+        for code in link_langs:
+            label = f"{code} {LANGS[code][0]}: " if code else ""
+            print(f"    {label}{cm_link(pid, code, args)}")
+    print(f"\nCardmarket summary: {len(matches)} printing(s) listed (open the links to check stock).")
+
+
 # ---------------- main ----------------
 def main():
     lang_help = "  ".join(f"{c}={n}" for c, (n, _) in LANGS.items())
@@ -399,8 +520,9 @@ def main():
                "case-insensitive.")
     ap.add_argument("name", help="English card name, e.g. \"Lightning Bolt\"")
     ap.add_argument("--site", default="all",
-                    choices=["all", "tcg", "tcgplayer", "ck", "cardkingdom"],
-                    help="search one site only (default: both)")
+                    choices=["all", "tcg", "tcgplayer", "ck", "cardkingdom", "cm", "cardmarket"],
+                    help="search one site only (default: TCGplayer and Card Kingdom; "
+                         "cm/cardmarket = Cardmarket only)")
     ap.add_argument("--lang", "-l", dest="langs", type=parse_langs, default=None,
                     help="only these languages, comma separated, e.g. --lang jp,cs or -l zh "
                          "(default: every language except English, or every language with --signed; "
@@ -413,19 +535,23 @@ def main():
     sig = ap.add_mutually_exclusive_group()
     sig.add_argument("--signed", dest="signed", action="store_const", const="signed",
                      help="signed cards only, any language unless --lang is given "
-                          "(TCGplayer only; based on the seller's listing text)")
+                          "(TCGplayer reads the seller's listing text; Cardmarket gets a filtered link; "
+                          "Card Kingdom has none)")
     sig.add_argument("--unsigned", dest="signed", action="store_const", const="unsigned",
                      help="leave out signed cards")
     ap.set_defaults(finish="all", signed="all")
+    ap.add_argument("--cardmarket", "--cm", action="store_true",
+                    help="also search Cardmarket (off by default; gives filtered links, "
+                         "since Cardmarket blocks scripts)")
     ap.add_argument("--fuzzy", action="store_true", help="looser name matching (substring)")
     ap.add_argument("--delay", type=float, default=0.7, help="seconds between requests")
     ap.add_argument("--max-products", type=int, default=80,
-                    help="max number of TCGplayer printings to check")
-    ap.add_argument("--ck-cache-hours", type=float, default=12,
-                    help="how long to reuse the cached Card Kingdom price list")
+                    help="max number of printings to check on TCGplayer / list on Cardmarket")
+    ap.add_argument("--cache-hours", "--ck-cache-hours", dest="cache_hours", type=float, default=12,
+                    help="how long to reuse the downloaded Card Kingdom / Cardmarket files")
     ap.add_argument("--debug", action="store_true", help="print raw API fields")
     args = ap.parse_args()
-    args.site = {"tcgplayer": "tcg", "cardkingdom": "ck"}.get(args.site, args.site)
+    args.site = {"tcgplayer": "tcg", "cardkingdom": "ck", "cardmarket": "cm"}.get(args.site, args.site)
     if args.langs is None:  # --signed means any language; otherwise foreign only
         args.langs = list(LANGS) if args.signed == "signed" else list(FOREIGN)
 
@@ -440,6 +566,11 @@ def main():
             run_ck(args.name, args)
         except Exception as e:
             print(f"Card Kingdom error: {e}", file=sys.stderr)
+    if args.site == "cm" or args.cardmarket:
+        try:
+            run_cm(args.name, args)
+        except Exception as e:
+            print(f"Cardmarket error: {e}", file=sys.stderr)
 
 
 if __name__ == "__main__":

@@ -22,6 +22,7 @@ import sys
 import time
 from collections import Counter, defaultdict
 from pathlib import Path
+from urllib.parse import urlencode
 from unicodedata import east_asian_width
 
 import requests
@@ -357,7 +358,7 @@ def run_ck(name, args):
     if args.signed == "signed":
         print("Card Kingdom 不卖签名卡，跳过。")
         return
-    items = ck_load(args.ck_cache_hours)
+    items = ck_load(args.cache_hours)
     matches = [it for it in items if name_matches(name, it.get("name", ""), args.fuzzy)]
     print(f"=== Card Kingdom：价格表里有 {len(matches)} 条匹配 ===")
     if args.debug:
@@ -394,6 +395,125 @@ def run_ck(name, args):
     print(f"\nCard Kingdom 小结：{len(foreign)} 条符合条件的版本。")
 
 
+# ---------------- Cardmarket ----------------
+# Cardmarket's website is behind Cloudflare and its API needs a seller account,
+# so listings can't be read. Its public catalog and price guide downloads are open:
+# they give every printing and its prices (all languages together), and the script
+# builds product links with Cardmarket's own filters already applied.
+CM_PRODUCTS_URL = "https://downloads.s3.cardmarket.com/productCatalog/productList/products_singles_1.json"
+CM_PRICES_URL = "https://downloads.s3.cardmarket.com/productCatalog/priceGuide/price_guide_1.json"
+CM_PRODUCT_PAGE = "https://www.cardmarket.com/en/Magic/Products"
+SCRYFALL_SEARCH = "https://api.scryfall.com/cards/search"
+# Cardmarket idLanguage numbers. It has no Phyrexian
+CM_LANG_ID = {"EN": 1, "FR": 2, "DE": 3, "SP": 4, "IT": 5, "CS": 6,
+              "JP": 7, "PT": 8, "RU": 9, "KR": 10, "CT": 11}
+
+
+def cached_json(url, filename, max_age_h, msg):
+    path = CK_CACHE.parent / filename
+    if path.exists() and time.time() - path.stat().st_mtime < max_age_h * 3600:
+        text = path.read_text()
+    else:
+        print(msg)
+        r = requests.get(url, headers={"User-Agent": UA}, timeout=180)
+        r.raise_for_status()
+        text = r.text
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
+    return json.loads(text)
+
+
+def scryfall_sets(name):
+    """Cardmarket idProduct -> (set name, release date), from Scryfall."""
+    out = {}
+    s = requests.Session()
+    s.headers.update({"User-Agent": "mtg-foreign-signed-finder/1.0", "Accept": "application/json"})
+    url = SCRYFALL_SEARCH
+    params = {"q": f'!"{name}"', "unique": "prints",
+              "include_extras": "true", "include_variations": "true"}
+    while url:
+        r = s.get(url, params=params, timeout=30)
+        if r.status_code == 404:  # no such card
+            break
+        r.raise_for_status()
+        d = r.json()
+        for c in d.get("data", []):
+            if c.get("cardmarket_id"):
+                out[c["cardmarket_id"]] = (c.get("set_name", ""), c.get("released_at", ""))
+        url, params = (d.get("next_page"), None) if d.get("has_more") else (None, None)
+        time.sleep(0.1)  # Scryfall asks for 50-100 ms between requests
+    return out
+
+
+def cm_link(pid, code, args):
+    q = {"idProduct": pid}
+    if code:
+        q["language"] = CM_LANG_ID[code]
+    if args.finish != "all":
+        q["isFoil"] = "Y" if args.finish == "foil" else "N"
+    if args.signed != "all":
+        q["isSigned"] = "Y" if args.signed == "signed" else "N"
+    return f"{CM_PRODUCT_PAGE}?{urlencode(q)}"
+
+
+def euro(v):
+    return f"€{v:.2f}" if v else "-"
+
+
+def run_cm(name, args):
+    print(f"\n{describe_search('Cardmarket', name, args)}")
+    usable = [c for c in args.langs if c in CM_LANG_ID]
+    if not usable:
+        print("Cardmarket 没有这些语言的筛选，跳过。")
+        return
+    products = cached_json(CM_PRODUCTS_URL, "cm_products.json", args.cache_hours,
+                           "下载 Cardmarket 商品目录（文件较大，会缓存）...")["products"]
+    matches = [p for p in products if name_matches(name, p.get("name", ""), args.fuzzy)
+               and not p.get("name", "").startswith("Art Series:")]  # art cards, not playable
+    if not matches:
+        print("没找到。检查牌名拼写（用英文名），或加 --fuzzy。")
+        return
+    guide = cached_json(CM_PRICES_URL, "cm_price_guide.json", args.cache_hours,
+                        "下载 Cardmarket 价格指导（文件较大，会缓存）...")
+    prices = {g["idProduct"]: g for g in guide.get("priceGuides", [])}
+    try:
+        sets = scryfall_sets(name)
+    except requests.RequestException as e:
+        print(f"  ! 没能从 Scryfall 拿到系列名（{e}），用系列编号代替")
+        sets = {}
+    matches.sort(key=lambda p: sets.get(p["idProduct"], ("", ""))[1], reverse=True)
+    matches = matches[:args.max_products]
+
+    # 默认的语言范围在页面上就是"不按语言筛选"
+    default_langs = set(args.langs) in (set(FOREIGN), set(LANGS))
+    link_langs = [None] if default_langs else usable
+    print(f"=== Cardmarket：找到 {len(matches)} 个匹配的版本 ===")
+    print("Cardmarket 有反爬，脚本没法确认有没有货。")
+    print("每个链接打开就是已经套好筛选条件的商品页。")
+    if default_langs and set(args.langs) == set(FOREIGN):
+        print("链接没有按语言筛选（页面里会包含英文挂单）；用 -l 指定语言可以得到按语言筛选的链接。")
+    left_out = [LANGS[c][1] for c in args.langs if c not in CM_LANG_ID and not default_langs]
+    if left_out:
+        print(f"Cardmarket 没有{'、'.join(left_out)}的筛选，已略过。")
+
+    for p in matches:
+        pid = p["idProduct"]
+        set_name = sets.get(pid, (f"Cardmarket 系列 #{p.get('idExpansion')}", ""))[0]
+        g = prices.get(pid, {})
+        print(f"\n[{set_name}] {p['name']}")
+        parts = []
+        if args.finish != "foil":
+            parts.append(f"平 最低 {euro(g.get('low'))}，趋势 {euro(g.get('trend'))}")
+        if args.finish != "nonfoil" and (g.get("low-foil") or g.get("trend-foil")):
+            parts.append(f"闪 最低 {euro(g.get('low-foil'))}，趋势 {euro(g.get('trend-foil'))}")
+        if parts:
+            print(f"  价格指导（所有语言合计）：{' | '.join(parts)}")
+        for code in link_langs:
+            label = f"{code} {LANGS[code][1]}：" if code else ""
+            print(f"    {label}{cm_link(pid, code, args)}")
+    print(f"\nCardmarket 小结：列出 {len(matches)} 个版本（打开链接查看有没有货）。")
+
+
 # ---------------- main ----------------
 def main():
     lang_help = "  ".join(f"{c}={zh}" for c, (_, zh, _) in LANGS.items())
@@ -403,8 +523,8 @@ def main():
                "也接受 ja/ko/es/de/fr 等常见缩写、英文全名和中文名（如 法语、日文），大小写不限。")
     ap.add_argument("name", help="牌的英文名，例如 \"Lightning Bolt\"")
     ap.add_argument("--site", default="all",
-                    choices=["all", "tcg", "tcgplayer", "ck", "cardkingdom"],
-                    help="只查某一家，默认两家都查")
+                    choices=["all", "tcg", "tcgplayer", "ck", "cardkingdom", "cm", "cardmarket"],
+                    help="只查某一家，默认查 TCGplayer 和 Card Kingdom；cm/cardmarket = 只查 Cardmarket")
     ap.add_argument("--lang", "-l", dest="langs", type=parse_langs, default=None,
                     help="只看这些语言，多个用逗号分隔，例如 -l fr,de,jp 或 -l 法语,德语"
                          "（默认除英语外的所有语言，用 --signed 时默认所有语言；加 en 可以包含英语）")
@@ -415,18 +535,20 @@ def main():
                      help="只看平卡")
     sig = ap.add_mutually_exclusive_group()
     sig.add_argument("--signed", dest="signed", action="store_const", const="signed",
-                     help="只看签名卡，不加 -l 时不限语言（仅 TCGplayer，按卖家写的挂单文字判断）")
+                     help="只看签名卡，不加 -l 时不限语言（TCGplayer 按卖家写的挂单文字判断；Cardmarket 给出筛选链接；Card Kingdom 不支持）")
     sig.add_argument("--unsigned", dest="signed", action="store_const", const="unsigned",
                      help="排除签名卡")
     ap.set_defaults(finish="all", signed="all")
+    ap.add_argument("--cardmarket", "--cm", action="store_true",
+                    help="同时查 Cardmarket（默认不查；Cardmarket 有反爬，给出套好筛选的链接）")
     ap.add_argument("--fuzzy", action="store_true", help="放宽名称匹配（包含即可）")
     ap.add_argument("--delay", type=float, default=0.7, help="每次请求间隔秒数")
-    ap.add_argument("--max-products", type=int, default=80, help="TCGplayer 最多查几个版本")
-    ap.add_argument("--ck-cache-hours", type=float, default=12,
-                    help="Card Kingdom 价格表缓存多少小时")
+    ap.add_argument("--max-products", type=int, default=80, help="TCGplayer 最多查几个版本 / Cardmarket 最多列几个版本")
+    ap.add_argument("--cache-hours", "--ck-cache-hours", dest="cache_hours", type=float, default=12,
+                    help="Card Kingdom / Cardmarket 下载的数据缓存多少小时")
     ap.add_argument("--debug", action="store_true", help="打印接口原始字段")
     args = ap.parse_args()
-    args.site = {"tcgplayer": "tcg", "cardkingdom": "ck"}.get(args.site, args.site)
+    args.site = {"tcgplayer": "tcg", "cardkingdom": "ck", "cardmarket": "cm"}.get(args.site, args.site)
     if args.langs is None:  # --signed means any language; otherwise foreign only
         args.langs = list(LANGS) if args.signed == "signed" else list(FOREIGN)
 
@@ -441,6 +563,11 @@ def main():
             run_ck(args.name, args)
         except Exception as e:
             print(f"Card Kingdom 出错：{e}", file=sys.stderr)
+    if args.site == "cm" or args.cardmarket:
+        try:
+            run_cm(args.name, args)
+        except Exception as e:
+            print(f"Cardmarket 出错：{e}", file=sys.stderr)
 
 
 if __name__ == "__main__":

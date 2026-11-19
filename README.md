@@ -2,7 +2,7 @@
 
 **English** | [中文](#中文)
 
-Look up a Magic: The Gathering card and find out which printings are sold in a non-English language on **TCGplayer** and **Card Kingdom**, with filters for language, foil/non-foil and signed cards.
+Look up a Magic: The Gathering card and find out which printings are sold in a non-English language on **TCGplayer** and **Card Kingdom** (and optionally **Cardmarket**), with filters for language, foil/non-foil and signed cards.
 
 Two scripts with identical features:
 
@@ -29,6 +29,8 @@ python3 mtg-foreign-signed-finder.py "Simic Signet" -l fr --foil           # Fre
 python3 mtg-foreign-signed-finder.py "Sol Ring" -l fr,de,jp                # French, German or Japanese
 python3 mtg-foreign-signed-finder.py "Sol Ring" --site tcg --max-products 5
 python3 mtg-foreign-signed-finder.py "Gala Greeters" --site cardkingdom -l zh --nonfoil
+python3 mtg-foreign-signed-finder.py "Demonic Tutor" --signed --cardmarket      # also Cardmarket
+python3 mtg-foreign-signed-finder.py "Sol Ring" --site cm -l jp --foil            # Cardmarket only
 python3 mtg-foreign-signed-finder.py "Lightning Bolt" --signed                # signed cards in any language
 python3 mtg-foreign-signed-finder.py "Lightning Bolt" -l en,jp --signed --foil  # signed English or Japanese foils
 ```
@@ -43,9 +45,11 @@ python3 mtg-foreign-signed-finder.py "Lightning Bolt" -l en,jp --signed --foil  
 - `--fuzzy` loosens matching to "name contains the query".
 
 ### Site selection
-- `--site all` (default) searches both sites.
+- `--site all` (default) searches TCGplayer and Card Kingdom.
 - `--site tcg` or `--site tcgplayer` searches TCGplayer only.
 - `--site ck` or `--site cardkingdom` searches Card Kingdom only.
+- `--site cm` or `--site cardmarket` searches Cardmarket only.
+- `--cardmarket` (or `--cm`) adds Cardmarket on top of whatever `--site` picks. **Cardmarket is never searched unless you ask for it.** See [Cardmarket](#cardmarket) for what it can and can't do.
 
 ### Language filter
 - `--lang` / `-l` limits results to one or more languages. Without it, every language **except English** is included, or **every language** when `--signed` is used. Add `en` to include English, e.g. `-l en,jp`.
@@ -78,9 +82,10 @@ python3 mtg-foreign-signed-finder.py "Lightning Bolt" -l en,jp --signed --foil  
 ### Signed filter
 - `--signed` shows signed cards only, in **any language** (English included). `--unsigned` leaves signed cards out. Default: both. They can't be used together.
 - Add `-l` to narrow down by language, e.g. `-l jp,de --signed` for signed Japanese or German only. Other filters combine too: `--signed --foil`.
-- **TCGplayer only.** Signed cards are photo listings, and whether a card is signed comes from the seller's own title and description. It counts wording like `Signed`, `Artist signed`, `Signed by ...`, `Autographed`, `with a signature` and `Artist Proof`, and ignores look-alikes like *Signature Spellbook*, `Signature Foil`, `not signed` and shipping wording such as `signature confirmation`. A seller who doesn't mention the signature won't be caught.
+- **TCGplayer** reads the listings themselves. Signed cards are photo listings, and whether a card is signed comes from the seller's own title and description. It counts wording like `Signed`, `Artist signed`, `Signed by ...`, `Autographed`, `with a signature` and `Artist Proof`, and ignores look-alikes like *Signature Spellbook*, `Signature Foil`, `not signed` and shipping wording such as `signature confirmation`. A seller who doesn't mention the signature won't be caught.
 - With `--signed`, each signed listing is shown on its own: language, finish, price, condition, seller and the seller's title. If the signature is only mentioned in the description, the part that mentions it is shown.
 - **Card Kingdom doesn't sell signed cards**, so with `--signed` it says so and is skipped.
+- **Cardmarket** links get its own signed filter (`isSigned=Y`, or `N` with `--unsigned`).
 
 ### Output
 - Before each site it says what it is looking for, e.g. `Searching TCGplayer for French foil Simic Signet...` or `Searching TCGplayer for signed Lightning Bolt in any language...` (Chinese script: `正在 TCGplayer 上找法语闪的 Simic Signet...`).
@@ -89,13 +94,21 @@ python3 mtg-foreign-signed-finder.py "Lightning Bolt" -l en,jp --signed --foil  
 - Each site ends with a one-line summary.
 - In a terminal, TCGplayer shows a progress line like `[3/15] Commander 2013` that updates in place. It is printed to stderr and hidden when output isn't a terminal, so redirecting to a file stays clean.
 
+### Cardmarket
+Cardmarket's website is behind Cloudflare bot protection and its API needs an approved seller account, so the script **can't read Cardmarket listings** and can't tell whether a printing is in stock. What it does instead:
+- Finds every printing from Cardmarket's public product catalog, with set names from [Scryfall](https://scryfall.com). Art Series cards are left out. A few special printings Scryfall doesn't map show as `Cardmarket expansion #id`.
+- Shows Cardmarket's price guide for each printing: lowest and trend price, normal and foil. **These cover all languages together.**
+- Gives a link to each printing with Cardmarket's own filters already applied: language, `--foil`/`--nonfoil` and `--signed`/`--unsigned`. Open it in a browser to see the matching listings.
+- With `-l`, there is one link per language. Without `-l`, links aren't filtered by language. Cardmarket has no Phyrexian filter, so `PH` is left out.
+- Printings are listed newest first, capped by `--max-products`.
+
 ### Other options
 
 | Option | Default | What it does |
 | --- | --- | --- |
-| `--max-products N` | 80 | Max number of TCGplayer printings to check |
+| `--max-products N` | 80 | Max number of printings to check on TCGplayer / list on Cardmarket |
 | `--delay SECONDS` | 0.7 | Pause between TCGplayer requests |
-| `--ck-cache-hours H` | 12 | How long to reuse the cached Card Kingdom price list |
+| `--cache-hours H` | 12 | How long to reuse the downloaded Card Kingdom / Cardmarket files (`--ck-cache-hours` still works) |
 | `--debug` | off | Print raw API fields, an unfiltered language breakdown, and every Card Kingdom match |
 | `-h` | | Show help, including the language code list |
 
@@ -108,13 +121,14 @@ python3 mtg-foreign-signed-finder.py "Lightning Bolt" -l en,jp --signed --foil  
 
 - **TCGplayer** is queried through the internal API its website uses. The script searches for the card, keeps exact name matches, then asks for listings of each printing filtered by language. Printings with many versions (Sol Ring has 100+) take a few minutes; use `--max-products` to limit. If TCGplayer changes its API the script will break; run with `--debug` to see what changed.
 - **Card Kingdom** sells almost only English cards, and its price list has no language field. The script detects foreign printings from the variant and set name, so it only finds printings Card Kingdom lists as their own version, such as WAR Japanese alternate art planeswalkers, Phyrexian language cards and SNC multilingual box toppers. "No matching printings" is usually the real answer, not a bug. With `-l en`, every printing without a language word counts as English.
-- The first Card Kingdom search downloads the full price list (large) and caches it in `~/.cache/mtg-foreign-signed-finder/`.
+- The first Card Kingdom search downloads the full price list (large) and caches it in `~/.cache/mtg-foreign-signed-finder/`. The first Cardmarket search does the same with its catalog and price guide.
+- **Cardmarket** only gets filtered links and price guide numbers, not real listings. See [Cardmarket](#cardmarket).
 
 ---
 
 ## 中文
 
-查一张万智牌在 **TCGplayer** 和 **Card Kingdom** 上，哪些版本有外语（非英文）在卖，可以按语言、闪/平和签名过滤。
+查一张万智牌在 **TCGplayer** 和 **Card Kingdom**（可选 **Cardmarket**）上，哪些版本有外语（非英文）在卖，可以按语言、闪/平和签名过滤。
 
 两个脚本功能完全一样：
 
@@ -141,6 +155,8 @@ python3 mtg-foreign-signed-finder-zh.py "Simic Signet" -l 法语 --foil        #
 python3 mtg-foreign-signed-finder-zh.py "Sol Ring" -l fr,de,jp               # 法语、德语、日语之一
 python3 mtg-foreign-signed-finder-zh.py "Sol Ring" --site tcg --max-products 5
 python3 mtg-foreign-signed-finder-zh.py "Gala Greeters" --site cardkingdom -l 中文 --nonfoil
+python3 mtg-foreign-signed-finder-zh.py "Demonic Tutor" --signed --cardmarket   # 加上 Cardmarket
+python3 mtg-foreign-signed-finder-zh.py "Sol Ring" --site cm -l 日语 --foil      # 只查 Cardmarket
 python3 mtg-foreign-signed-finder-zh.py "Lightning Bolt" --signed               # 任何语言的签名卡
 python3 mtg-foreign-signed-finder-zh.py "Lightning Bolt" -l 英语,日语 --signed --foil  # 英语或日语的签名闪
 ```
@@ -155,9 +171,11 @@ python3 mtg-foreign-signed-finder-zh.py "Lightning Bolt" -l 英语,日语 --sign
 - `--fuzzy` 放宽为"名称包含输入内容即可"。
 
 #### 选择网站
-- `--site all`（默认）两家都查。
+- `--site all`（默认）查 TCGplayer 和 Card Kingdom。
 - `--site tcg` 或 `--site tcgplayer` 只查 TCGplayer。
 - `--site ck` 或 `--site cardkingdom` 只查 Card Kingdom。
+- `--site cm` 或 `--site cardmarket` 只查 Cardmarket。
+- `--cardmarket`（或 `--cm`）在 `--site` 选的网站之外再加上 Cardmarket。**不加参数时不会查 Cardmarket。** 它能做什么、不能做什么见下面的 [Cardmarket](#cardmarket-1) 一节。
 
 #### 语言过滤
 - `--lang` / `-l` 只看指定的一种或多种语言。不加时包含**除英语外**的所有语言；用 `--signed` 时则包含**所有语言**。要包含英语就加上 `en`，例如 `-l en,jp`。
@@ -175,9 +193,10 @@ python3 mtg-foreign-signed-finder-zh.py "Lightning Bolt" -l 英语,日语 --sign
 #### 签名过滤
 - `--signed` 只看签名卡，**不限语言**（包括英文）。`--unsigned` 排除签名卡。默认都看，两个不能同时用。
 - 想限定语言就加 `-l`，例如 `-l jp,de --signed` 只看日文或德文的签名卡。也能和其他过滤一起用：`--signed --foil`。
-- **只支持 TCGplayer。** 签名卡都是卖家拍照上传的挂单，是否签名是根据卖家自己写的标题和描述判断的。会识别 `Signed`、`Artist signed`、`Signed by ...`、`Autographed`、`with a signature`、`Artist Proof` 这类写法，并排除 *Signature Spellbook* 系列、`Signature Foil` 版本、`not signed`，以及 `signature confirmation`（寄件签收）这类看起来像但不是签名的词。卖家没写签名的就识别不了。
+- **TCGplayer** 直接读挂单。签名卡都是卖家拍照上传的挂单，是否签名是根据卖家自己写的标题和描述判断的。会识别 `Signed`、`Artist signed`、`Signed by ...`、`Autographed`、`with a signature`、`Artist Proof` 这类写法，并排除 *Signature Spellbook* 系列、`Signature Foil` 版本、`not signed`，以及 `signature confirmation`（寄件签收）这类看起来像但不是签名的词。卖家没写签名的就识别不了。
 - 用 `--signed` 时每张签名卡单独列一行：语言、闪/平、价格、品相、卖家和卖家写的标题。签名只写在描述里的，会显示描述中提到签名的那一段。
 - **Card Kingdom 不卖签名卡**，用 `--signed` 时会提示并跳过。
+- **Cardmarket** 的链接会带上它自己的签名筛选（`isSigned=Y`，用 `--unsigned` 时是 `N`）。
 
 #### 输出
 - 每查一家网站前先说明在找什么，例如 `正在 TCGplayer 上找法语闪的 Simic Signet...`、`正在 TCGplayer 上找任意语言签名的 Lightning Bolt...`。
@@ -186,13 +205,21 @@ python3 mtg-foreign-signed-finder-zh.py "Lightning Bolt" -l 英语,日语 --sign
 - 每家网站最后有一行小结。
 - 在终端里运行时，TCGplayer 会显示一行原地刷新的进度，例如 `[3/15] Commander 2013`。这行输出到 stderr，输出重定向到文件时不显示，不会弄乱结果。
 
+#### Cardmarket
+Cardmarket 网站有 Cloudflare 反爬，API 又需要审核过的卖家账号，所以脚本**读不到 Cardmarket 的挂单**，也没法知道某个版本有没有货。它做的是：
+- 从 Cardmarket 公开的商品目录里找出所有版本，系列名来自 [Scryfall](https://scryfall.com)。Art Series 艺术卡会被排除。少数 Scryfall 没对应上的特殊版本显示为 `Cardmarket 系列 #编号`。
+- 显示每个版本的 Cardmarket 价格指导：平卡和闪卡的最低价、趋势价。**这是所有语言合在一起的价格。**
+- 给出每个版本的链接，已经套好 Cardmarket 自己的筛选：语言、`--foil`/`--nonfoil`、`--signed`/`--unsigned`。在浏览器里打开就能看到符合条件的挂单。
+- 用 `-l` 时每种语言一个链接；不加 `-l` 时链接不按语言筛选。Cardmarket 没有 Phyrexian 语的筛选，`PH` 会被略过。
+- 版本按从新到旧排列，数量受 `--max-products` 限制。
+
 #### 其他参数
 
 | 参数 | 默认值 | 作用 |
 | --- | --- | --- |
-| `--max-products N` | 80 | TCGplayer 最多查几个版本 |
+| `--max-products N` | 80 | TCGplayer 最多查几个版本 / Cardmarket 最多列几个版本 |
 | `--delay 秒数` | 0.7 | TCGplayer 每次请求的间隔 |
-| `--ck-cache-hours 小时` | 12 | Card Kingdom 价格表缓存多久 |
+| `--cache-hours 小时` | 12 | Card Kingdom / Cardmarket 下载的数据缓存多久（旧的 `--ck-cache-hours` 也能用） |
 | `--debug` | 关 | 打印接口原始字段、不过滤时的语言分布，以及 Card Kingdom 的每条匹配 |
 | `-h` | | 显示帮助，包括语言代码列表 |
 
@@ -205,4 +232,5 @@ python3 mtg-foreign-signed-finder-zh.py "Lightning Bolt" -l 英语,日语 --sign
 
 - **TCGplayer** 用的是网页前端的内部接口。脚本先搜索牌名、保留名字完全匹配的版本，再按语言逐个查挂单。版本多的牌（比如 Sol Ring 有 100 多个版本）要跑几分钟，可以用 `--max-products` 限制。TCGplayer 改接口时脚本会失效，用 `--debug` 看哪里变了。
 - **Card Kingdom** 基本只卖英文卡，价格表里也没有语言字段。脚本根据版本描述和系列名判断语言，所以只能查到它单独列成一个版本的外语印刷，比如 WAR 日文异画鹏洛客、Phyrexian 语版本、SNC 多语言盒顶卡。显示"没有符合条件的版本"通常就是真实情况，不是脚本坏了。用 `-l en` 时，版本描述里没有语言词的都算英语。
-- 第一次查 Card Kingdom 会下载全量价格表（文件较大），缓存在 `~/.cache/mtg-foreign-signed-finder/`。
+- 第一次查 Card Kingdom 会下载全量价格表（文件较大），缓存在 `~/.cache/mtg-foreign-signed-finder/`。第一次查 Cardmarket 也会下载并缓存它的商品目录和价格指导。
+- **Cardmarket** 只能给出筛选链接和价格指导，读不到真实挂单，详见 [Cardmarket](#cardmarket-1)。
