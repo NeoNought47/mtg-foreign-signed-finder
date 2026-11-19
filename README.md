@@ -11,6 +11,8 @@ Two scripts with identical features:
 | `mtg-foreign-signed-finder.py` | English |
 | `mtg-foreign-signed-finder-zh.py` | Chinese (also accepts Chinese language names like `法语`) |
 
+Plus `mtg-foreign-signed-watch.py`, which keeps watching for cards that aren't for sale yet and notifies you when they show up. See [Watching cards](#watching-cards).
+
 ## Install
 
 Requires Python 3.8+ and `requests`:
@@ -117,6 +119,36 @@ Cardmarket's website is behind Cloudflare bot protection and its API needs an ap
 - A failed printing is reported and skipped; the rest of the search continues.
 - An error on one site doesn't stop the other site from being searched.
 
+## Watching cards
+
+If a card isn't for sale today, `mtg-foreign-signed-watch.py` can check for you every day and send a macOS notification when a matching listing shows up. You can watch several cards at once.
+
+```bash
+python3 mtg-foreign-signed-watch.py add "Demonic Tutor" -l fr --signed   # French signed Demonic Tutor
+python3 mtg-foreign-signed-watch.py add "Sol Ring" -l jp,de --foil        # Japanese or German foil Sol Ring
+python3 mtg-foreign-signed-watch.py list                                  # what you're watching
+python3 mtg-foreign-signed-watch.py schedule 09:00                        # check every day at 9:00
+```
+
+| Command | What it does |
+| --- | --- |
+| `add NAME [filters]` | Add a card. Takes the same `-l`, `--foil`/`--nonfoil`, `--signed`/`--unsigned`, `--site`, `--fuzzy`, `--max-products` as the finder. It checks right away and shows what's there now; after that you're only told about listings that are new. `--no-check` skips the first check. |
+| `list` | Show every watch with its number, when it was last checked and how many listings matched, plus whether the daily check is on. |
+| `remove N [N ...]` | Remove watches by number. |
+| `check [N ...]` | Check now (all watches, or only these numbers). `--notify` also sends a notification when something new shows up. |
+| `report` | Show the results of the last check. |
+| `schedule [HH:MM]` | Check every day at that time (default 09:00). If the Mac is asleep then, it checks when it wakes up. Running it again changes the time. |
+| `unschedule` | Stop the daily check. |
+
+Add `--zh` to any command for Chinese output. The schedule remembers it, so `schedule 09:00 --zh` gives Chinese notifications.
+
+How it works:
+- "New" means a listing it hasn't seen before. On TCGplayer each seller's listing counts separately, so a second seller listing the same card is new. On Card Kingdom a printing counts once it is in stock.
+- The notification says how many new listings were found and for which cards. Run `report` for prices, sellers and links.
+- It watches TCGplayer and Card Kingdom. Signed watches only use TCGplayer, since Card Kingdom doesn't sell signed cards. Cardmarket can't be watched because the script can't read its listings.
+- The daily check is a macOS launchd job at `~/Library/LaunchAgents/com.mtg-foreign-signed-finder.watch.plist`. Your Mac has to be on (asleep is fine). macOS may ask once to allow notifications.
+- The watch list, last report and log are in `~/.config/mtg-foreign-signed-finder/`.
+
 ## How it works and limitations
 
 - **TCGplayer** is queried through the internal API its website uses. The script searches for the card, keeps exact name matches, then asks for listings of each printing filtered by language. Printings with many versions (Sol Ring has 100+) take a few minutes; use `--max-products` to limit. If TCGplayer changes its API the script will break; run with `--debug` to see what changed.
@@ -136,6 +168,8 @@ Cardmarket's website is behind Cloudflare bot protection and its API needs an ap
 | --- | --- |
 | `mtg-foreign-signed-finder.py` | 英文 |
 | `mtg-foreign-signed-finder-zh.py` | 中文（`-l` 也能直接写 `法语` 这样的中文名） |
+
+另外还有 `mtg-foreign-signed-watch.py`，用来蹲现在还没货的卡，有货时通知你。见 [蹲卡](#蹲卡)。
 
 ### 安装
 
@@ -227,6 +261,36 @@ Cardmarket 网站有 Cloudflare 反爬，API 又需要审核过的卖家账号�
 - 遇到限流或服务器错误（429、5xx）会自动重试，最多 3 次，等待时间逐次加长。
 - 某个版本请求失败会提示并跳过，其他版本继续查。
 - 一家网站出错不影响另一家。
+
+### 蹲卡
+
+想要的卡今天没货的话，`mtg-foreign-signed-watch.py` 可以每天帮你查一次，有符合条件的挂单时弹 macOS 通知。可以同时蹲多张卡。
+
+```bash
+python3 mtg-foreign-signed-watch.py --zh add "Demonic Tutor" -l 法语 --signed   # 蹲法语签名的 Demonic Tutor
+python3 mtg-foreign-signed-watch.py --zh add "Sol Ring" -l jp,de --foil          # 蹲日语或德语闪的 Sol Ring
+python3 mtg-foreign-signed-watch.py --zh list                                    # 查看在蹲什么
+python3 mtg-foreign-signed-watch.py --zh schedule 09:00                          # 每天 9 点自动检查
+```
+
+| 命令 | 作用 |
+| --- | --- |
+| `add 牌名 [过滤条件]` | 添加要蹲的卡。过滤参数和查询脚本一样：`-l`、`--foil`/`--nonfoil`、`--signed`/`--unsigned`、`--site`、`--fuzzy`、`--max-products`。添加后会马上查一次，显示现在已有的挂单；之后只提醒新出现的。加 `--no-check` 可以跳过这次检查。 |
+| `list` | 列出所有在蹲的卡：编号、上次检查时间、匹配到几条挂单，以及每日自动检查有没有开。 |
+| `remove 编号 [编号 ...]` | 按编号删除。 |
+| `check [编号 ...]` | 立刻检查（全部，或只查指定编号）。加 `--notify` 时有新挂单会弹通知。 |
+| `report` | 查看上次检查的结果。 |
+| `schedule [HH:MM]` | 每天在这个时间自动检查（默认 09:00）。到点时电脑在睡眠的话，唤醒后补查。再运行一次可以改时间。 |
+| `unschedule` | 关闭每日自动检查。 |
+
+任何命令加 `--zh` 都是中文输出。`schedule` 会记住这个设置，所以 `schedule 09:00 --zh` 之后的通知也是中文。
+
+原理：
+- "新挂单"指以前没见过的挂单。TCGplayer 上每个卖家的挂单单独算，所以又有一个卖家挂了同一张卡也算新的。Card Kingdom 上某个版本有库存就算一条。
+- 通知里会写有几条新挂单、是哪张卡。价格、卖家和链接用 `report` 查看。
+- 查 TCGplayer 和 Card Kingdom。签名卡只查 TCGplayer，因为 Card Kingdom 不卖签名卡。Cardmarket 读不到挂单，所以没法蹲。
+- 每日检查是一个 macOS launchd 任务，文件在 `~/Library/LaunchAgents/com.mtg-foreign-signed-finder.watch.plist`。电脑需要开着（睡眠也可以）。第一次弹通知时 macOS 可能会问你是否允许。
+- 蹲卡清单、上次结果和日志都在 `~/.config/mtg-foreign-signed-finder/`。
 
 ### 原理和限制
 
