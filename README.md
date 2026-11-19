@@ -1,4 +1,4 @@
-# polyglot
+# MTG Foreign & Signed Finder
 
 **English** | [中文](#中文)
 
@@ -8,8 +8,8 @@ Two scripts with identical features:
 
 | Script | Output language |
 | --- | --- |
-| `polyglot.py` | English |
-| `polyglot_zh.py` | Chinese (also accepts Chinese language names like `法语`) |
+| `mtg-foreign-signed-finder.py` | English |
+| `mtg-foreign-signed-finder-zh.py` | Chinese (also accepts Chinese language names like `法语`) |
 
 ## Install
 
@@ -17,20 +17,20 @@ Requires Python 3.8+ and `requests`:
 
 ```bash
 pip install requests
-git clone https://github.com/NeoNought47/polyglot.git
-cd polyglot
+git clone https://github.com/NeoNought47/mtg-foreign-signed-finder.git
+cd mtg-foreign-signed-finder
 ```
 
 ## Quick start
 
 ```bash
-python3 polyglot.py "Lightning Bolt"                      # every non-English printing on both sites
-python3 polyglot.py "Simic Signet" -l fr --foil           # French foils only
-python3 polyglot.py "Sol Ring" -l fr,de,jp                # French, German or Japanese
-python3 polyglot.py "Sol Ring" --site tcg --max-products 5
-python3 polyglot.py "Gala Greeters" --site cardkingdom -l zh --nonfoil
-python3 polyglot.py "Lightning Bolt" --signed                # signed foreign cards
-python3 polyglot.py "Lightning Bolt" -l en,jp --signed --foil  # signed English or Japanese foils
+python3 mtg-foreign-signed-finder.py "Lightning Bolt"                      # every non-English printing on both sites
+python3 mtg-foreign-signed-finder.py "Simic Signet" -l fr --foil           # French foils only
+python3 mtg-foreign-signed-finder.py "Sol Ring" -l fr,de,jp                # French, German or Japanese
+python3 mtg-foreign-signed-finder.py "Sol Ring" --site tcg --max-products 5
+python3 mtg-foreign-signed-finder.py "Gala Greeters" --site cardkingdom -l zh --nonfoil
+python3 mtg-foreign-signed-finder.py "Lightning Bolt" --signed                # signed foreign cards
+python3 mtg-foreign-signed-finder.py "Lightning Bolt" -l en,jp --signed --foil  # signed English or Japanese foils
 ```
 
 ## Features
@@ -54,7 +54,7 @@ python3 polyglot.py "Lightning Bolt" -l en,jp --signed --foil  # signed English 
 - Codes, aliases and full English names can be mixed, case-insensitive: `-l french,ger,ja`.
 - An unknown language prints an error listing the valid codes.
 
-| Code | Language | Also accepted | Chinese names (`polyglot_zh.py` only) |
+| Code | Language | Also accepted | Chinese names (`mtg-foreign-signed-finder-zh.py` only) |
 | --- | --- | --- | --- |
 | EN | English | eng, english | 英, 英语, 英文 |
 | JP | Japanese | ja, jpn | 日, 日语, 日文 |
@@ -109,7 +109,7 @@ python3 polyglot.py "Lightning Bolt" -l en,jp --signed --foil  # signed English 
 
 - **TCGplayer** is queried through the internal API its website uses. The script searches for the card, keeps exact name matches, then asks for listings of each printing filtered by language. Printings with many versions (Sol Ring has 100+) take a few minutes; use `--max-products` to limit. If TCGplayer changes its API the script will break; run with `--debug` to see what changed.
 - **Card Kingdom** sells almost only English cards, and its price list has no language field. The script detects foreign printings from the variant and set name, so it only finds printings Card Kingdom lists as their own version, such as WAR Japanese alternate art planeswalkers, Phyrexian language cards and SNC multilingual box toppers. "No matching printings" is usually the real answer, not a bug. With `-l en`, every printing without a language word counts as English.
-- The first Card Kingdom search downloads the full price list (large) and caches it in `~/.cache/polyglot/`.
+- The first Card Kingdom search downloads the full price list (large) and caches it in `~/.cache/mtg-foreign-signed-finder/`.
 
 ---
 
@@ -121,8 +121,8 @@ python3 polyglot.py "Lightning Bolt" -l en,jp --signed --foil  # signed English 
 
 | 脚本 | 输出语言 |
 | --- | --- |
-| `polyglot.py` | 英文 |
-| `polyglot_zh.py` | 中文（`-l` 也能直接写 `法语` 这样的中文名） |
+| `mtg-foreign-signed-finder.py` | 英文 |
+| `mtg-foreign-signed-finder-zh.py` | 中文（`-l` 也能直接写 `法语` 这样的中文名） |
 
 ### 安装
 
@@ -130,20 +130,20 @@ python3 polyglot.py "Lightning Bolt" -l en,jp --signed --foil  # signed English 
 
 ```bash
 pip install requests
-git clone https://github.com/NeoNought47/polyglot.git
-cd polyglot
+git clone https://github.com/NeoNought47/mtg-foreign-signed-finder.git
+cd mtg-foreign-signed-finder
 ```
 
 ### 快速上手
 
 ```bash
-python3 polyglot_zh.py "Lightning Bolt"                     # 两家网站所有外语版本
-python3 polyglot_zh.py "Simic Signet" -l 法语 --foil        # 只看法语闪
-python3 polyglot_zh.py "Sol Ring" -l fr,de,jp               # 法语、德语、日语之一
-python3 polyglot_zh.py "Sol Ring" --site tcg --max-products 5
-python3 polyglot_zh.py "Gala Greeters" --site cardkingdom -l 中文 --nonfoil
-python3 polyglot_zh.py "Lightning Bolt" --signed               # 外语签名卡
-python3 polyglot_zh.py "Lightning Bolt" -l 英语,日语 --signed --foil  # 英语或日语的签名闪
+python3 mtg-foreign-signed-finder-zh.py "Lightning Bolt"                     # 两家网站所有外语版本
+python3 mtg-foreign-signed-finder-zh.py "Simic Signet" -l 法语 --foil        # 只看法语闪
+python3 mtg-foreign-signed-finder-zh.py "Sol Ring" -l fr,de,jp               # 法语、德语、日语之一
+python3 mtg-foreign-signed-finder-zh.py "Sol Ring" --site tcg --max-products 5
+python3 mtg-foreign-signed-finder-zh.py "Gala Greeters" --site cardkingdom -l 中文 --nonfoil
+python3 mtg-foreign-signed-finder-zh.py "Lightning Bolt" --signed               # 外语签名卡
+python3 mtg-foreign-signed-finder-zh.py "Lightning Bolt" -l 英语,日语 --signed --foil  # 英语或日语的签名闪
 ```
 
 ### 功能
@@ -207,4 +207,4 @@ python3 polyglot_zh.py "Lightning Bolt" -l 英语,日语 --signed --foil  # 英�
 
 - **TCGplayer** 用的是网页前端的内部接口。脚本先搜索牌名、保留名字完全匹配的版本，再按语言逐个查挂单。版本多的牌（比如 Sol Ring 有 100 多个版本）要跑几分钟，可以用 `--max-products` 限制。TCGplayer 改接口时脚本会失效，用 `--debug` 看哪里变了。
 - **Card Kingdom** 基本只卖英文卡，价格表里也没有语言字段。脚本根据版本描述和系列名判断语言，所以只能查到它单独列成一个版本的外语印刷，比如 WAR 日文异画鹏洛客、Phyrexian 语版本、SNC 多语言盒顶卡。显示"没有符合条件的版本"通常就是真实情况，不是脚本坏了。用 `-l en` 时，版本描述里没有语言词的都算英语。
-- 第一次查 Card Kingdom 会下载全量价格表（文件较大），缓存在 `~/.cache/polyglot/`。
+- 第一次查 Card Kingdom 会下载全量价格表（文件较大），缓存在 `~/.cache/mtg-foreign-signed-finder/`。
