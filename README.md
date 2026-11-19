@@ -9,9 +9,37 @@ pip install requests
 python3 polyglot.py "Lightning Bolt"
 python3 polyglot.py "Sol Ring" --site tcg --max-products 5
 python3 polyglot.py "Karn, the Great Creator" --site ck
+python3 polyglot.py "Lightning Bolt" -l jp,cs --foil
+python3 polyglot.py "Gala Greeters" --site cardkingdom -l zh --nonfoil
 ```
 
-常用参数：`--site all|tcg|ck`、`--fuzzy`、`--delay`、`--max-products`、`--debug`。
+| 参数 | 作用 |
+| --- | --- |
+| `--site all\|tcg\|tcgplayer\|ck\|cardkingdom` | 只查某一家，默认两家都查 |
+| `--lang` / `-l` | 只看某些语言，逗号分隔，例如 `-l jp,cs` |
+| `--foil` / `--nonfoil` | 只看闪卡 / 只看平卡 |
+| `--fuzzy` | 放宽名称匹配 |
+| `--max-products` | TCGplayer 最多查几个版本 |
+| `--delay` | 每次请求间隔秒数 |
+| `--debug` | 打印接口原始字段，排查用 |
+
+### 语言代码
+
+| 代码 | 语言 | 也接受 |
+| --- | --- | --- |
+| JP | Japanese | ja, jpn |
+| CS | Chinese (S) 简体 | zhs, chs, sc |
+| CT | Chinese (T) 繁体 | zht, cht, tc |
+| KR | Korean | ko, kor |
+| DE | German | ger, deu |
+| FR | French | fra, fre |
+| IT | Italian | ita |
+| SP | Spanish | es, spa |
+| PT | Portuguese | por |
+| RU | Russian | rus |
+| PH | Phyrexian | phy |
+
+`zh` 或 `cn` 表示简繁中文都要。英文全名也可以用，大小写不限。
 
 ## 说明
 
