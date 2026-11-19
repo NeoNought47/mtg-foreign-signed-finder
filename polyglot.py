@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 """
-polyglot.py — 查一张万智牌在 TCGplayer 和 Card Kingdom 上，哪些版本有外语（非英文）在卖
+polyglot.py - find which printings of a Magic: The Gathering card are sold in a
+non-English language on TCGplayer and Card Kingdom.
 
-用法:
+Usage:
   python3 polyglot.py "Lightning Bolt"
   python3 polyglot.py "Sol Ring" --site tcg
+  python3 polyglot.py "Simic Signet" -l fr --foil
   python3 polyglot.py "Liliana, Dreadhorde General" --site ck
-  python3 polyglot.py "Lightning Bolt" --debug     # 首次运行建议加，用来核对接口返回的字段
+  python3 polyglot.py "Lightning Bolt" --debug     # print raw API fields
 
-依赖: pip install requests
+Requires: pip install requests
 """
 import argparse
 import json
@@ -23,7 +25,7 @@ import requests
 UA = ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/130.0 Safari/537.36")
 
-# 语言代码 -> (TCGplayer 的语言名, 可以接受的别名)。代码取 TCGplayer 的 languageAbbreviation
+# code -> (TCGplayer language name, accepted aliases). Codes follow TCGplayer's languageAbbreviation
 LANGS = {
     "JP": ("Japanese",    ["ja", "jpn", "japanese"]),
     "CS": ("Chinese (S)", ["zhs", "chs", "sc", "simplified"]),
@@ -37,11 +39,13 @@ LANGS = {
     "RU": ("Russian",     ["rus", "russian"]),
     "PH": ("Phyrexian",   ["phy", "phyrexian"]),
 }
-# 一个别名展开成多个代码
+# Readable names for progress messages
+LANG_DISPLAY = {"CS": "Simplified Chinese", "CT": "Traditional Chinese"}
+# Aliases that expand to several codes
 LANG_GROUPS = {"zh": ["CS", "CT"], "cn": ["CS", "CT"], "chinese": ["CS", "CT"]}
 TCG_NAME_TO_CODE = {name: code for code, (name, _) in LANGS.items()}
 
-# Card Kingdom 版本描述里出现这些词，视为外语版本
+# Words in a Card Kingdom variation/edition that mark a foreign printing
 LANG_RE = re.compile(
     r"\b(japanese|jpn|jp|chinese|korean|german|french|italian|spanish|"
     r"portuguese|russian|phyrexian)\b", re.I)
@@ -64,7 +68,7 @@ def parse_langs(value: str):
                      if t == c.lower() or t == name.lower() or t in aliases]
         if not found:
             raise argparse.ArgumentTypeError(
-                f"不认识的语言 '{tok}'，可用代码: {', '.join(LANGS)}（或 zh = 简繁中文）")
+                f"unknown language '{tok}'. Valid codes: {', '.join(LANGS)} (or zh = both Chinese)")
         codes += [c for c in found if c not in codes]
     return codes
 
@@ -73,9 +77,27 @@ def finish_ok(is_foil: bool, finish: str) -> bool:
     return finish == "all" or (finish == "foil") == is_foil
 
 
-# ---------------- 通用 ----------------
+def describe_search(site: str, name: str, args) -> str:
+    """e.g. 'Searching TCGplayer for French foil Simic Signet...'"""
+    if set(args.langs) == set(LANGS):
+        lang = "non-English"
+    else:
+        names = [LANG_DISPLAY.get(c, LANGS[c][0]) for c in args.langs]
+        lang = names[0] if len(names) == 1 else ", ".join(names[:-1]) + " or " + names[-1]
+    finish = {"foil": " foil", "nonfoil": " non-foil"}.get(args.finish, "")
+    return f"Searching {site} for {lang}{finish} {name}..."
+
+
+def progress(msg: str):
+    """One-line progress on stderr that overwrites itself (only in a terminal)."""
+    if sys.stderr.isatty():
+        sys.stderr.write("\r\033[K" + msg)
+        sys.stderr.flush()
+
+
+# ---------------- common ----------------
 def base_name(s: str) -> str:
-    """去掉括号里的版本说明，例如 'Lightning Bolt (Borderless)' -> 'lightning bolt'"""
+    """Drop bracketed variant info, e.g. 'Lightning Bolt (Borderless)' -> 'lightning bolt'"""
     return re.sub(r"\s*[\(\[].*?[\)\]]", "", s).strip().lower()
 
 
@@ -84,7 +106,7 @@ def name_matches(query: str, product_name: str, fuzzy: bool = False) -> bool:
     b = base_name(product_name)
     if b == q:
         return True
-    if q in [f.strip() for f in b.split("//")]:  # 双面牌
+    if q in [f.strip() for f in b.split("//")]:  # double-faced / split cards
         return True
     return fuzzy and q in product_name.lower()
 
@@ -120,7 +142,7 @@ def tcg_session():
 
 def tcg_search(s, name, delay, max_products, fuzzy, debug):
     products, frm, size = [], 0, 50
-    for _ in range(6):  # 最多翻 6 页搜索结果
+    for _ in range(6):  # at most 6 pages of search results
         body = {"algorithm": "sales_synonym_v2", "from": frm, "size": size,
                 "filters": {"term": {"productLineName": ["magic"],
                                      "productTypeName": ["Cards"]},
@@ -132,9 +154,9 @@ def tcg_search(s, name, delay, max_products, fuzzy, debug):
         block = post_json(s, TCG_SEARCH, body, params={"q": name, "isList": "false"})["results"][0]
         items = block.get("results", [])
         if debug and frm == 0:
-            print(f"[debug] TCG 搜索 totalResults={block.get('totalResults')}")
+            print(f"[debug] TCG search totalResults={block.get('totalResults')}")
             if items:
-                print("[debug] 第一条结果的字段:", sorted(items[0].keys()))
+                print("[debug] first result fields:", sorted(items[0].keys()))
         hits = 0
         for it in items:
             pname = it.get("productName", "")
@@ -143,7 +165,7 @@ def tcg_search(s, name, delay, max_products, fuzzy, debug):
                 products.append({"id": int(it["productId"]), "name": pname,
                                  "set": it.get("setName", "")})
         frm += size
-        # 结果按相关度排序：已经找到过、这一页又一个都没匹配上，就停
+        # Results are sorted by relevance: stop once a page has no matches after earlier hits
         if not items or frm >= block.get("totalResults", 0) or (products and hits == 0):
             break
         if len(products) >= max_products:
@@ -173,31 +195,35 @@ def tcg_listings(s, pid, langs, delay, max_pages=10):
 
 
 def run_tcg(name, args):
+    print(f"\n{describe_search('TCGplayer', name, args)}")
     s = tcg_session()
     products = tcg_search(s, name, args.delay, args.max_products, args.fuzzy, args.debug)
-    print(f"\n=== TCGplayer：找到 {len(products)} 个匹配的版本，逐个查外语挂单 ===")
+    print(f"=== TCGplayer: {len(products)} matching printings, checking listings for each ===")
     if not products:
-        print("没找到。检查牌名拼写（用英文名），或加 --fuzzy。")
+        print("Nothing found. Check the spelling (use the English card name), or try --fuzzy.")
         return
 
-    if args.debug:  # 不加语言过滤看一页，核对语言字段的真实取值
+    if args.debug:  # one unfiltered page, to check the real language values
         sample = tcg_listings(s, products[0]["id"], None, args.delay, max_pages=1)
-        print(f"[debug] {products[0]['name']} 的挂单语言分布:",
+        print(f"[debug] language breakdown for {products[0]['name']}:",
               Counter(x.get("language") for x in sample))
         if sample:
-            print("[debug] 挂单字段:", sorted(sample[0].keys()))
+            print("[debug] listing fields:", sorted(sample[0].keys()))
 
     tcg_langs = [LANGS[c][0] for c in args.langs]
     found, warned = 0, False
-    for p in products:
+    for i, p in enumerate(products, 1):
+        progress(f"  [{i}/{len(products)}] {p['set']}")
         time.sleep(args.delay)
         try:
             items = tcg_listings(s, p["id"], tcg_langs, args.delay)
         except requests.HTTPError as e:
-            print(f"  ! {p['set']} / {p['name']}: 请求失败 {e}")
+            progress("")
+            print(f"  ! {p['set']} / {p['name']}: request failed: {e}")
             continue
         if any(x.get("language") == "English" for x in items) and not warned:
-            print("  ! 注意：语言过滤似乎没生效，已在本地排除英文挂单")
+            progress("")
+            print("  ! Note: the language filter seems to be ignored; English listings removed locally")
             warned = True
         groups = defaultdict(lambda: {"n": 0, "qty": 0, "min": None})
         for x in items:
@@ -215,13 +241,15 @@ def run_tcg(name, args):
         if not groups:
             continue
         found += 1
+        progress("")
         print(f"\n[{p['set']}] {p['name']}")
         print(f"  https://www.tcgplayer.com/product/{p['id']}")
         for (lang, printing), g in sorted(groups.items()):
             code = TCG_NAME_TO_CODE.get(lang, "??")
-            print(f"    {code} {lang:<12} {printing:<8} {g['n']:>3} 条挂单 / 共 {g['qty']:>3} 张"
-                  f"   最低 ${g['min']:.2f}")
-    print(f"\nTCGplayer 小结：{len(products)} 个版本里，{found} 个有外语挂单。")
+            print(f"    {code} {lang:<12} {printing:<8} {g['n']:>3} listings / {g['qty']:>3} cards"
+                  f"   from ${g['min']:.2f}")
+    progress("")
+    print(f"\nTCGplayer summary: {found} of {len(products)} printings have matching listings.")
 
 
 # ---------------- Card Kingdom ----------------
@@ -233,7 +261,7 @@ def ck_load(max_age_h):
     if CK_CACHE.exists() and time.time() - CK_CACHE.stat().st_mtime < max_age_h * 3600:
         text = CK_CACHE.read_text()
     else:
-        print("下载 Card Kingdom 全量价格表（文件较大，会缓存）...")
+        print("Downloading the full Card Kingdom price list (large file, will be cached)...")
         r = requests.get(CK_URL, headers={"User-Agent": UA}, timeout=180)
         r.raise_for_status()
         text = r.text
@@ -244,19 +272,21 @@ def ck_load(max_age_h):
 
 
 def run_ck(name, args):
+    print(f"\n{describe_search('Card Kingdom', name, args)}")
     items = ck_load(args.ck_cache_hours)
     matches = [it for it in items if name_matches(name, it.get("name", ""), args.fuzzy)]
-    print(f"\n=== Card Kingdom：价格表里有 {len(matches)} 条匹配 ===")
+    print(f"=== Card Kingdom: {len(matches)} matching entries in the price list ===")
     if args.debug:
         if items:
-            print("[debug] 价格表字段:", sorted(items[0].keys()))
+            print("[debug] price list fields:", sorted(items[0].keys()))
         for it in matches:
             print("[debug]", it.get("sku"), "|", it.get("edition"), "|",
                   it.get("name"), "|", it.get("variation"), "| foil:", it.get("is_foil"))
 
     foreign = []
     for it in matches:
-        # 只看版本描述和系列名，不看牌名，否则 "Phyrexian Arena" 这类牌会被误判
+        # Only look at variation and edition, not the card name,
+        # otherwise cards like "Phyrexian Arena" are flagged as Phyrexian language
         text = " ".join(str(it.get(k) or "") for k in ("variation", "edition"))
         m = LANG_RE.search(text)
         if not m:
@@ -270,7 +300,7 @@ def run_ck(name, args):
         if code in args.langs and finish_ok(is_foil, args.finish):
             foreign.append((code, is_foil, it))
     if not foreign:
-        print("没有符合条件的外语版本（按版本描述判断）。")
+        print("No matching foreign-language printings (based on the variant description).")
         return
     for code, is_foil, it in foreign:
         foil = "Foil" if is_foil else "Normal"
@@ -278,34 +308,37 @@ def run_ck(name, args):
         var = f" ({it['variation']})" if it.get("variation") else ""
         print(f"\n[{it.get('edition')}] {it.get('name')}{var}")
         print(f"  https://www.cardkingdom.com/{str(it.get('url', '')).lstrip('/')}")
-        print(f"    {lang:<15} {foil:<8} 售价 ${it.get('price_retail')}   库存 {it.get('qty_retail')}")
-    print(f"\nCard Kingdom 小结：{len(foreign)} 条外语版本。")
+        print(f"    {lang:<15} {foil:<8} ${it.get('price_retail')}   in stock: {it.get('qty_retail')}")
+    print(f"\nCard Kingdom summary: {len(foreign)} foreign-language printings.")
 
 
 # ---------------- main ----------------
 def main():
     lang_help = "  ".join(f"{c}={n}" for c, (n, _) in LANGS.items())
     ap = argparse.ArgumentParser(
-        description="查 MTG 卡在 TCGplayer / Card Kingdom 的外语版本",
-        epilog=f"语言代码: {lang_help}  zh=简繁中文都要。"
-               "也接受 ja/ko/es/de/fr 等常见缩写和英文全名，大小写不限。")
-    ap.add_argument("name", help="牌的英文名，例如 \"Lightning Bolt\"")
+        description="Find foreign-language printings of an MTG card on TCGplayer / Card Kingdom",
+        epilog=f"Language codes: {lang_help}  zh=both Simplified and Traditional Chinese. "
+               "Common abbreviations (ja/ko/es/de/fr...) and full English names also work, "
+               "case-insensitive.")
+    ap.add_argument("name", help="English card name, e.g. \"Lightning Bolt\"")
     ap.add_argument("--site", default="all",
                     choices=["all", "tcg", "tcgplayer", "ck", "cardkingdom"],
-                    help="只查某一家，默认两家都查")
+                    help="search one site only (default: both)")
     ap.add_argument("--lang", "-l", dest="langs", type=parse_langs, default=list(LANGS),
-                    help="只看这些语言，逗号分隔，例如 --lang jp,cs 或 -l zh")
+                    help="only these languages, comma separated, e.g. --lang jp,cs or -l zh")
     fin = ap.add_mutually_exclusive_group()
     fin.add_argument("--foil", dest="finish", action="store_const", const="foil",
-                     help="只看闪卡")
+                     help="foils only")
     fin.add_argument("--nonfoil", dest="finish", action="store_const", const="nonfoil",
-                     help="只看平卡")
+                     help="non-foils only")
     ap.set_defaults(finish="all")
-    ap.add_argument("--fuzzy", action="store_true", help="放宽名称匹配（包含即可）")
-    ap.add_argument("--delay", type=float, default=0.7, help="每次请求间隔秒数")
-    ap.add_argument("--max-products", type=int, default=80, help="TCGplayer 最多查几个版本")
-    ap.add_argument("--ck-cache-hours", type=float, default=12)
-    ap.add_argument("--debug", action="store_true")
+    ap.add_argument("--fuzzy", action="store_true", help="looser name matching (substring)")
+    ap.add_argument("--delay", type=float, default=0.7, help="seconds between requests")
+    ap.add_argument("--max-products", type=int, default=80,
+                    help="max number of TCGplayer printings to check")
+    ap.add_argument("--ck-cache-hours", type=float, default=12,
+                    help="how long to reuse the cached Card Kingdom price list")
+    ap.add_argument("--debug", action="store_true", help="print raw API fields")
     args = ap.parse_args()
     args.site = {"tcgplayer": "tcg", "cardkingdom": "ck"}.get(args.site, args.site)
 
@@ -313,12 +346,13 @@ def main():
         try:
             run_tcg(args.name, args)
         except Exception as e:
-            print(f"TCGplayer 出错: {e}", file=sys.stderr)
+            progress("")
+            print(f"TCGplayer error: {e}", file=sys.stderr)
     if args.site in ("all", "ck"):
         try:
             run_ck(args.name, args)
         except Exception as e:
-            print(f"Card Kingdom 出错: {e}", file=sys.stderr)
+            print(f"Card Kingdom error: {e}", file=sys.stderr)
 
 
 if __name__ == "__main__":
