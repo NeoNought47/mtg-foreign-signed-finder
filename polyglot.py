@@ -106,7 +106,7 @@ def name_matches(query: str, product_name: str, fuzzy: bool = False) -> bool:
     b = base_name(product_name)
     if b == q:
         return True
-    if q in [f.strip() for f in b.split("//")]:  # double-faced / split cards
+    if q in [f.strip() for f in b.split("//")]:  # split cards (double-faced cards are listed by front face)
         return True
     return fuzzy and q in product_name.lower()
 
