@@ -55,22 +55,37 @@ FOREIGN = [c for c in LANGS if c != "EN"]
 SIGNED_RE = re.compile(r"\bsigned\b|\bautograph(ed)?\b|\bsignature\b|\bartist proof\b", re.I)
 NOT_SIGNED_RE = re.compile(
     r"\b(not|never|no)\s+(been\s+)?signed\b|\bno\s+signature\b|"
-    r"\bsignature\s+(spellbook|foil|series|edition)\b", re.I)
+    r"\bsignature\s+(spellbook|foil|series|edition)\b|"
+    # shipping wording, e.g. "shipped with signature confirmation"
+    r"\bsignature\s+(confirmation|confirm|required|on\s+delivery|tracking|service)\b|"
+    r"\b(require|requires|required|with)\s+(a\s+)?signature\s+(upon|on|at)\s+delivery\b", re.I)
+
+
+def clean_html(t: str) -> str:
+    t = html.unescape(html.unescape(t or ""))  # TCGplayer escapes the HTML twice
+    return " ".join(re.sub(r"<[^>]+>", " ", t).replace("\xa0", " ").split())
 
 
 def listing_text(x) -> str:
     cd = x.get("customData") or {}
-    text = html.unescape(f"{cd.get('title') or ''} {cd.get('description') or ''}")
-    return re.sub(r"<[^>]+>", " ", text)
+    return f"{clean_html(cd.get('title'))} {clean_html(cd.get('description'))}"
 
 
 def listing_title(x) -> str:
     """Seller's title, plus the description when it adds something."""
     cd = x.get("customData") or {}
-    clean = lambda t: " ".join(re.sub(r"<[^>]+>", " ", html.unescape(t or "")).split())
-    title, desc = clean(cd.get("title")), clean(cd.get("description"))
-    text = title if not desc or desc in title else f"{title} | {desc}"
-    return text[:100]
+    title, desc = clean_html(cd.get("title")), clean_html(cd.get("description"))
+    if not desc or desc in title:
+        return title[:100]
+    probe = NOT_SIGNED_RE.sub(lambda m: " " * len(m.group()), desc)
+    m = None if SIGNED_RE.search(title) else SIGNED_RE.search(probe)
+    if m:  # show the part of the description that mentions the signature
+        start = max(0, m.start() - 40)
+        snippet = ("..." if start else "") + desc[start:m.end() + 50].strip()
+        if m.end() + 50 < len(desc):
+            snippet += "..."
+        return f"{title[:50]} | {snippet}"
+    return f"{title} | {desc}"[:100]
 
 
 def is_signed(x) -> bool:
@@ -119,13 +134,14 @@ def describe_search(site: str, name: str, args) -> str:
     if set(args.langs) == set(FOREIGN):
         lang = "non-English"
     elif set(args.langs) == set(LANGS):
-        lang = "any-language"
+        lang = ""
     else:
         names = [LANG_DISPLAY.get(c, LANGS[c][0]) for c in args.langs]
         lang = names[0] if len(names) == 1 else ", ".join(names[:-1]) + " or " + names[-1]
     signed = {"signed": " signed", "unsigned": " unsigned"}.get(args.signed, "")
     finish = {"foil": " foil", "nonfoil": " non-foil"}.get(args.finish, "")
-    return f"Searching {site} for {lang}{signed}{finish} {name}..."
+    what = " ".join(w for w in (lang, signed.strip(), finish.strip(), name) if w)
+    return f"Searching {site} for {what}..."
 
 
 def progress(msg: str):
@@ -383,9 +399,10 @@ def main():
     ap.add_argument("--site", default="all",
                     choices=["all", "tcg", "tcgplayer", "ck", "cardkingdom"],
                     help="search one site only (default: both)")
-    ap.add_argument("--lang", "-l", dest="langs", type=parse_langs, default=list(FOREIGN),
+    ap.add_argument("--lang", "-l", dest="langs", type=parse_langs, default=None,
                     help="only these languages, comma separated, e.g. --lang jp,cs or -l zh "
-                         "(default: every language except English; add en to include English)")
+                         "(default: every language except English, or every language with --signed; "
+                         "add en to include English)")
     fin = ap.add_mutually_exclusive_group()
     fin.add_argument("--foil", dest="finish", action="store_const", const="foil",
                      help="foils only")
@@ -393,7 +410,8 @@ def main():
                      help="non-foils only")
     sig = ap.add_mutually_exclusive_group()
     sig.add_argument("--signed", dest="signed", action="store_const", const="signed",
-                     help="signed cards only (TCGplayer only; based on the seller's listing text)")
+                     help="signed cards only, any language unless --lang is given "
+                          "(TCGplayer only; based on the seller's listing text)")
     sig.add_argument("--unsigned", dest="signed", action="store_const", const="unsigned",
                      help="leave out signed cards")
     ap.set_defaults(finish="all", signed="all")
@@ -406,6 +424,8 @@ def main():
     ap.add_argument("--debug", action="store_true", help="print raw API fields")
     args = ap.parse_args()
     args.site = {"tcgplayer": "tcg", "cardkingdom": "ck"}.get(args.site, args.site)
+    if args.langs is None:  # --signed means any language; otherwise foreign only
+        args.langs = list(LANGS) if args.signed == "signed" else list(FOREIGN)
 
     if args.site in ("all", "tcg"):
         try:

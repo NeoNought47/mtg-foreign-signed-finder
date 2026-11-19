@@ -29,7 +29,7 @@ python3 mtg-foreign-signed-finder.py "Simic Signet" -l fr --foil           # Fre
 python3 mtg-foreign-signed-finder.py "Sol Ring" -l fr,de,jp                # French, German or Japanese
 python3 mtg-foreign-signed-finder.py "Sol Ring" --site tcg --max-products 5
 python3 mtg-foreign-signed-finder.py "Gala Greeters" --site cardkingdom -l zh --nonfoil
-python3 mtg-foreign-signed-finder.py "Lightning Bolt" --signed                # signed foreign cards
+python3 mtg-foreign-signed-finder.py "Lightning Bolt" --signed                # signed cards in any language
 python3 mtg-foreign-signed-finder.py "Lightning Bolt" -l en,jp --signed --foil  # signed English or Japanese foils
 ```
 
@@ -48,7 +48,7 @@ python3 mtg-foreign-signed-finder.py "Lightning Bolt" -l en,jp --signed --foil  
 - `--site ck` or `--site cardkingdom` searches Card Kingdom only.
 
 ### Language filter
-- `--lang` / `-l` limits results to one or more languages. Without it, every language **except English** is included. Add `en` to include English, e.g. `-l en,jp`.
+- `--lang` / `-l` limits results to one or more languages. Without it, every language **except English** is included, or **every language** when `--signed` is used. Add `en` to include English, e.g. `-l en,jp`.
 - Multiple languages mean "any of these": `-l fr,de,jp` shows French, German **or** Japanese.
 - Separate with commas, or with spaces inside quotes: `-l "fr de jp"`.
 - Codes, aliases and full English names can be mixed, case-insensitive: `-l french,ger,ja`.
@@ -76,15 +76,14 @@ python3 mtg-foreign-signed-finder.py "Lightning Bolt" -l en,jp --signed --foil  
 - Combines with the language filter: `-l fr,de,jp --foil`.
 
 ### Signed filter
-- `--signed` shows signed cards only, `--unsigned` leaves signed cards out. Default: both. They can't be used together.
-- Combines with the other filters: `-l en,jp --signed --foil`.
-- **TCGplayer only.** Signed cards are photo listings, and whether a card is signed comes from the seller's own title and description. It counts wording like `Signed`, `Artist signed`, `Signed by ...`, `Autographed`, `with a signature` and `Artist Proof`, and ignores look-alikes like *Signature Spellbook*, `Signature Foil` and `not signed`. A seller who doesn't mention the signature won't be caught.
-- With `--signed`, each signed listing is shown on its own: language, finish, price, condition, seller and the seller's title.
+- `--signed` shows signed cards only, in **any language** (English included). `--unsigned` leaves signed cards out. Default: both. They can't be used together.
+- Add `-l` to narrow down by language, e.g. `-l jp,de --signed` for signed Japanese or German only. Other filters combine too: `--signed --foil`.
+- **TCGplayer only.** Signed cards are photo listings, and whether a card is signed comes from the seller's own title and description. It counts wording like `Signed`, `Artist signed`, `Signed by ...`, `Autographed`, `with a signature` and `Artist Proof`, and ignores look-alikes like *Signature Spellbook*, `Signature Foil`, `not signed` and shipping wording such as `signature confirmation`. A seller who doesn't mention the signature won't be caught.
+- With `--signed`, each signed listing is shown on its own: language, finish, price, condition, seller and the seller's title. If the signature is only mentioned in the description, the part that mentions it is shown.
 - **Card Kingdom doesn't sell signed cards**, so with `--signed` it says so and is skipped.
-- Signed foreign cards are rare. If nothing shows up, try adding `-l en`.
 
 ### Output
-- Before each site it says what it is looking for, e.g. `Searching TCGplayer for French foil Simic Signet...` or `Searching TCGplayer for non-English signed Lightning Bolt...` (Chinese script: `正在 TCGplayer 上找法语闪的 Simic Signet...`).
+- Before each site it says what it is looking for, e.g. `Searching TCGplayer for French foil Simic Signet...` or `Searching TCGplayer for signed Lightning Bolt...` (Chinese script: `正在 TCGplayer 上找法语闪的 Simic Signet...`).
 - **TCGplayer**: for each printing with matching listings, shows the set, product link, and per language and finish the number of listings, total quantity and lowest price.
 - **Card Kingdom**: for each matching printing, shows the set, variant, product link, language, finish, retail price and stock.
 - Each site ends with a one-line summary.
@@ -142,7 +141,7 @@ python3 mtg-foreign-signed-finder-zh.py "Simic Signet" -l 法语 --foil        #
 python3 mtg-foreign-signed-finder-zh.py "Sol Ring" -l fr,de,jp               # 法语、德语、日语之一
 python3 mtg-foreign-signed-finder-zh.py "Sol Ring" --site tcg --max-products 5
 python3 mtg-foreign-signed-finder-zh.py "Gala Greeters" --site cardkingdom -l 中文 --nonfoil
-python3 mtg-foreign-signed-finder-zh.py "Lightning Bolt" --signed               # 外语签名卡
+python3 mtg-foreign-signed-finder-zh.py "Lightning Bolt" --signed               # 任何语言的签名卡
 python3 mtg-foreign-signed-finder-zh.py "Lightning Bolt" -l 英语,日语 --signed --foil  # 英语或日语的签名闪
 ```
 
@@ -161,7 +160,7 @@ python3 mtg-foreign-signed-finder-zh.py "Lightning Bolt" -l 英语,日语 --sign
 - `--site ck` 或 `--site cardkingdom` 只查 Card Kingdom。
 
 #### 语言过滤
-- `--lang` / `-l` 只看指定的一种或多种语言。不加时包含**除英语外**的所有语言。要包含英语就加上 `en`，例如 `-l en,jp`。
+- `--lang` / `-l` 只看指定的一种或多种语言。不加时包含**除英语外**的所有语言；用 `--signed` 时则包含**所有语言**。要包含英语就加上 `en`，例如 `-l en,jp`。
 - 多种语言表示"其中之一"：`-l fr,de,jp` 会列出法语、德语**或**日语。
 - 用逗号分隔，或者加引号用空格分隔：`-l "fr de jp"`。中文版还支持中文逗号和顿号：`-l 法语、德语，日语`。
 - 代码、别名、英文全名可以混着写，不分大小写：`-l french,ger,ja`。
@@ -174,15 +173,14 @@ python3 mtg-foreign-signed-finder-zh.py "Lightning Bolt" -l 英语,日语 --sign
 - 可以和语言过滤一起用：`-l fr,de,jp --foil`。
 
 #### 签名过滤
-- `--signed` 只看签名卡，`--unsigned` 排除签名卡，默认都看。两个不能同时用。
-- 可以和其他过滤一起用：`-l en,jp --signed --foil`。
-- **只支持 TCGplayer。** 签名卡都是卖家拍照上传的挂单，是否签名是根据卖家自己写的标题和描述判断的。会识别 `Signed`、`Artist signed`、`Signed by ...`、`Autographed`、`with a signature`、`Artist Proof` 这类写法，并排除 *Signature Spellbook* 系列、`Signature Foil` 版本、`not signed` 这类看起来像但不是签名的词。卖家没写签名的就识别不了。
-- 用 `--signed` 时每张签名卡单独列一行：语言、闪/平、价格、品相、卖家和卖家写的标题。
+- `--signed` 只看签名卡，**不限语言**（包括英文）。`--unsigned` 排除签名卡。默认都看，两个不能同时用。
+- 想限定语言就加 `-l`，例如 `-l jp,de --signed` 只看日文或德文的签名卡。也能和其他过滤一起用：`--signed --foil`。
+- **只支持 TCGplayer。** 签名卡都是卖家拍照上传的挂单，是否签名是根据卖家自己写的标题和描述判断的。会识别 `Signed`、`Artist signed`、`Signed by ...`、`Autographed`、`with a signature`、`Artist Proof` 这类写法，并排除 *Signature Spellbook* 系列、`Signature Foil` 版本、`not signed`，以及 `signature confirmation`（寄件签收）这类看起来像但不是签名的词。卖家没写签名的就识别不了。
+- 用 `--signed` 时每张签名卡单独列一行：语言、闪/平、价格、品相、卖家和卖家写的标题。签名只写在描述里的，会显示描述中提到签名的那一段。
 - **Card Kingdom 不卖签名卡**，用 `--signed` 时会提示并跳过。
-- 外语签名卡很少，查不到的话可以试试加上 `-l en`。
 
 #### 输出
-- 每查一家网站前先说明在找什么，例如 `正在 TCGplayer 上找法语闪的 Simic Signet...`、`正在 TCGplayer 上找外语签名的 Lightning Bolt...`。
+- 每查一家网站前先说明在找什么，例如 `正在 TCGplayer 上找法语闪的 Simic Signet...`、`正在 TCGplayer 上找签名的 Lightning Bolt...`。
 - **TCGplayer**：每个有符合条件挂单的版本，列出系列、商品链接，以及每种语言和闪/平的挂单数、总张数、最低价。
 - **Card Kingdom**：每个符合条件的版本，列出系列、版本描述、商品链接、语言、闪/平、售价和库存。
 - 每家网站最后有一行小结。
